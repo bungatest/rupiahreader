@@ -13,7 +13,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=6.0">
+  <link rel="stylesheet" href="style.css?v=8.0">
 </head>
 <body class="theme-modern">
   <a class="skip-link" href="#tap-fullscreen">Lewati ke area pemindai</a>
@@ -65,25 +65,38 @@
     
     <!-- Top Navigation Bar (Frosted Circular Buttons) -->
     <header class="top-nav-bar">
-      <button id="btn-back" class="nav-circle-btn" type="button" aria-label="Kembali">
+      <button id="btn-back" class="nav-circle-btn" type="button" aria-label="Pindai Ulang">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="15 18 9 12 15 6"></polyline>
         </svg>
       </button>
 
       <!-- Mini Chip Status GPU & Kamera -->
-      <div id="ai-chip" class="ai-status-chip" role="status">
+      <div id="ai-chip" class="ai-status-chip" role="status" title="Ketuk untuk buka diagnostik">
         <span class="chip-pulse"></span>
         <span id="chip-text" class="chip-text">AI Scanner Active</span>
       </div>
 
-      <button id="btn-menu" class="nav-circle-btn" type="button" aria-label="Menu Opsi & Total">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-          <circle cx="12" cy="5" r="2.2"></circle>
-          <circle cx="12" cy="12" r="2.2"></circle>
-          <circle cx="12" cy="19" r="2.2"></circle>
-        </svg>
-      </button>
+      <div class="top-actions-right">
+        <!-- Tombol Ganti Kamera (Webcam Laptop <-> Kamera Belakang HP) -->
+        <button id="btn-switch-cam" class="nav-circle-btn" type="button" aria-label="Ganti Kamera">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M11 19H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5"></path>
+            <path d="M13 5h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-5"></path>
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="m18 22-3-3 3-3"></path>
+            <path d="m6 2 3 3-3 3"></path>
+          </svg>
+        </button>
+
+        <button id="btn-menu" class="nav-circle-btn" type="button" aria-label="Menu Opsi & Total">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <circle cx="12" cy="5" r="2.2"></circle>
+            <circle cx="12" cy="12" r="2.2"></circle>
+            <circle cx="12" cy="19" r="2.2"></circle>
+          </svg>
+        </button>
+      </div>
     </header>
 
     <!-- Tombol Zoom Melayang di Kiri Bawah (1x) -->
@@ -137,7 +150,7 @@
     </div>
   </div>
 
-  <!-- Modal Bottom Sheet Menu (Total Akumulasi & Pengaturan) -->
+  <!-- Modal Bottom Sheet Menu (Total Akumulasi & Pengaturan & MLOps Diagnostic) -->
   <div id="menu-backdrop" class="menu-backdrop" hidden>
     <div id="menu-sheet" class="menu-bottom-sheet">
       <div class="sheet-handle"></div>
@@ -158,16 +171,42 @@
 
       <div class="sheet-info-group">
         <div class="sheet-info-row">
-          <span class="info-label">Model AI</span>
-          <span class="info-val">Custom CNN (99.44% Akurasi)</span>
+          <span class="info-label">Model AI (Client-Side)</span>
+          <span class="info-val">MobileNetV2 Fine-Tuned (95.03%)</span>
         </div>
         <div class="sheet-info-row">
-          <span class="info-label">Akselerasi Hardware</span>
-          <span id="sheet-gpu-val" class="info-val">GPU WebGL Aktif</span>
+          <span class="info-label">Inference Engine</span>
+          <span id="sheet-gpu-val" class="info-val">TensorFlow.js WebGL GPU</span>
+        </div>
+        <div class="sheet-info-row">
+          <span class="info-label">Kamera Aktif</span>
+          <span id="sheet-cam-val" class="info-val">Webcam</span>
         </div>
         <div class="sheet-info-row">
           <span class="info-label">Panduan Suara (TTS)</span>
           <span id="sheet-tts-status" class="info-val">Bahasa Indonesia (Aktif)</span>
+        </div>
+      </div>
+
+      <!-- MLOps Diagnostic Panel -->
+      <div class="sheet-diagnostic-card">
+        <div class="diag-header">
+          <span class="diag-title">📊 MLOps Diagnostic Panel</span>
+          <span id="diag-state-badge" class="diag-badge badge-idle">IDLE</span>
+        </div>
+        <div class="diag-grid">
+          <div class="diag-item"><span class="diag-lbl">Model:</span> <span id="diag-model">MobileNetV2 v2.1.0</span></div>
+          <div class="diag-item"><span class="diag-lbl">Engine:</span> <span id="diag-backend">WebGL GPU</span></div>
+          <div class="diag-item"><span class="diag-lbl">Input:</span> <span id="diag-input">224×224 RGB [0,1]</span></div>
+          <div class="diag-item"><span class="diag-lbl">Latensi:</span> <span id="diag-latency">- ms</span></div>
+          <div class="diag-item"><span class="diag-lbl">Prediksi:</span> <span id="diag-prediction">-</span></div>
+          <div class="diag-item"><span class="diag-lbl">Confidence:</span> <span id="diag-conf">-</span></div>
+        </div>
+        <div class="diag-top3">
+          <div class="diag-top3-label">Distribusi Top-3 Kelas:</div>
+          <div id="diag-top3-list" class="diag-top3-list">
+            <span style="opacity:0.6;">Belum ada hasil pemindaian</span>
+          </div>
         </div>
       </div>
       
@@ -178,7 +217,9 @@
   <!-- Screen reader live region -->
   <p id="sr-status" class="sr-only" aria-live="polite"></p>
 
-  <script src="coin-reader.js?v=6.0"></script>
-  <script src="script.js?v=6.0"></script>
+  <!-- TensorFlow.js Library -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+  <script src="coin-reader.js?v=8.0"></script>
+  <script src="script.js?v=8.0"></script>
 </body>
 </html>

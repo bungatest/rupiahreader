@@ -86,18 +86,33 @@ html, body {
   height: 100dvh;
   z-index: 1;
   background: #000000;
+  overflow: hidden;
 }
 
 #camera-preview {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  min-width: 100%;
+  min-height: 100%;
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
+  z-index: 1;
+  background: #000000;
+}
+
+/* Mirroring halus untuk kamera depan / webcam laptop */
+body.cam-user #camera-preview {
+  transform: translate(-50%, -50%) scaleX(-1);
 }
 
 .camera-ambient-overlay {
   position: absolute;
   inset: 0;
+  z-index: 2;
   pointer-events: none;
   background: linear-gradient(
     180deg,
@@ -117,7 +132,7 @@ html, body {
   width: 100vw;
   height: 100vh;
   height: 100dvh;
-  z-index: 2;
+  z-index: 5;
   background: transparent;
   border: none;
   padding: 0;
@@ -364,6 +379,12 @@ body.show-success .success-badge {
   align-items: center;
   justify-content: space-between;
   pointer-events: auto;
+}
+
+.top-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .nav-circle-btn {
@@ -801,6 +822,105 @@ body.show-success .success-badge {
   text-align: center;
   line-height: 1.4;
 }
+
+/* --------------------------------------------------------------------------
+   MLOps Diagnostic Card (Non-intrusive)
+   -------------------------------------------------------------------------- */
+.sheet-diagnostic-card {
+  margin: 14px 0 6px 0;
+  background: #090d16;
+  color: #e2e8f0;
+  border-radius: 14px;
+  padding: 13px 15px;
+  border: 1px solid rgba(139, 92, 246, 0.28);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+.diag-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 9px;
+}
+
+.diag-title {
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: #c4b5fd;
+  letter-spacing: 0.02em;
+}
+
+.diag-badge {
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 2.5px 8px;
+  border-radius: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.badge-confirmed { background: #059669; color: #ffffff; }
+.badge-uncertain { background: #d97706; color: #ffffff; }
+.badge-unknown   { background: #dc2626; color: #ffffff; }
+.badge-scanning  { background: #6366f1; color: #ffffff; }
+.badge-idle      { background: #475569; color: #ffffff; }
+
+.diag-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px 10px;
+  font-size: 0.74rem;
+}
+
+.diag-item {
+  display: flex;
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  padding-bottom: 3px;
+}
+
+.diag-lbl {
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.diag-item span:last-child {
+  color: #f8fafc;
+  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.diag-top3 {
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 0.73rem;
+}
+
+.diag-top3-label {
+  color: #94a3b8;
+  margin-bottom: 5px;
+  font-weight: 600;
+}
+
+.diag-top3-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.diag-top3-row {
+  display: flex;
+  justify-content: space-between;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 3px 7px;
+  border-radius: 5px;
+}
+
+.diag-top3-row .top3-class { color: #e2e8f0; font-weight: 600; }
+.diag-top3-row .top3-pct { color: #38bdf8; font-weight: 800; }
+
 
 @keyframes fadeIn {
   from { opacity: 0; }
