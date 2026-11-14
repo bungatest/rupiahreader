@@ -334,13 +334,15 @@ function classToNominal(className) {
       el.tabCoin.classList.remove("active");
       el.tabCoin.setAttribute("aria-selected", "false");
 
-      el.viewfinderFrame.classList.remove("frame-coin");
-      el.viewfinderFrame.classList.add("frame-banknote");
-      el.reticleGlyph.textContent = "💵";
-      el.tapMainText.textContent = "Posisikan Uang Kertas & Ketuk";
-      el.appTagline.textContent = "Arahkan kamera ke seluruh permukaan uang kertas lalu ketuk layar";
-      if (el.modelSelectContainer) el.modelSelectContainer.style.display = "none";
-      el.fieldPanel.style.display = "block";
+      if (el.viewfinderFrame) {
+        el.viewfinderFrame.style.display = "flex";
+        el.viewfinderFrame.classList.remove("frame-coin");
+        el.viewfinderFrame.classList.add("frame-banknote");
+      }
+      if (el.reticleGlyph) el.reticleGlyph.textContent = "💵";
+      if (el.tapMainText) el.tapMainText.textContent = "Posisikan Uang Kertas & Ketuk";
+      if (el.appTagline) el.appTagline.textContent = "Arahkan kamera ke permukaan uang kertas lalu ketuk layar";
+      if (el.fieldPanel) el.fieldPanel.style.display = "none";
 
       notify("Mode uang kertas aktif.");
     } else {
@@ -349,15 +351,14 @@ function classToNominal(className) {
       el.tabBanknote.classList.remove("active");
       el.tabBanknote.setAttribute("aria-selected", "false");
 
-      el.viewfinderFrame.classList.remove("frame-banknote");
-      el.viewfinderFrame.classList.add("frame-coin");
-      el.reticleGlyph.textContent = "🪙";
-      el.tapMainText.textContent = "Dekatkan Koin & Ketuk";
-      el.appTagline.textContent = "Dekatkan kamera ke koin (jarak ~10-15 cm) lalu ketuk layar";
-      if (el.modelSelectContainer) el.modelSelectContainer.style.display = "none";
-      el.fieldPanel.style.display = "none";
+      // Mode Koin: HILANGKAN FRAME TOTAL (Aksesibilitas Tunanetra)
+      if (el.viewfinderFrame) {
+        el.viewfinderFrame.style.display = "none";
+      }
+      if (el.appTagline) el.appTagline.textContent = "Dekatkan koin ke kamera lalu ketuk layar di mana saja";
+      if (el.fieldPanel) el.fieldPanel.style.display = "none";
 
-      notify("Mode koin aktif.");
+      notify("Mode koin aktif. Ketuk layar di mana saja untuk memindai.");
     }
   }
 

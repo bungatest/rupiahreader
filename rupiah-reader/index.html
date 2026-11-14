@@ -82,30 +82,13 @@
           <div id="inference-meta" class="inference-meta" aria-hidden="true"></div>
         </section>
 
-        <!-- Panel Uji Lapangan (Field Testing Ground Truth) -->
-        <section id="field-eval-panel" class="field-eval-panel" aria-label="Panel Pencatatan Uji Lapangan">
-          <p class="field-eval-prompt">🎯 Catat Label Sebenarnya (Uji Lapangan):</p>
-          <div class="nominal-tag-grid" role="group" aria-label="Pilih nominal sebenarnya">
-            <button class="btn-tag" data-nominal="idr_1000" type="button">1.000</button>
-            <button class="btn-tag" data-nominal="idr_2000" type="button">2.000</button>
-            <button class="btn-tag" data-nominal="idr_5000" type="button">5.000</button>
-            <button class="btn-tag" data-nominal="idr_10000" type="button">10.000</button>
-            <button class="btn-tag" data-nominal="idr_20000" type="button">20.000</button>
-            <button class="btn-tag" data-nominal="idr_50000" type="button">50.000</button>
-            <button class="btn-tag" data-nominal="idr_100000" type="button">100.000</button>
-          </div>
-          
-          <div class="field-footer-row">
-            <span id="field-stats-badge" class="stat-badge">Uji: 0 | Akurasi: -%</span>
-            <a id="btn-export-csv" href="/api/field/export" class="stat-link" download>📥 Unduh CSV</a>
-            <button id="btn-open-feedback" class="stat-feedback-btn" type="button">💬 Masukan</button>
-          </div>
-        </section>
-
-        <!-- Ringkasan Akumulasi Total -->
+        <!-- Ringkasan Akumulasi Total & Tombol CSV -->
         <div class="total-wrapper">
-          <p id="total-display" class="total-value">Total: Rp 0</p>
-          <p class="total-gesture-hint" aria-hidden="true">Ketuk 2x = Tambah Total</p>
+          <div class="total-info">
+            <p id="total-display" class="total-value">Total: Rp 0</p>
+            <p class="total-gesture-hint" aria-hidden="true">Ketuk 2x Layar = Tambah Total</p>
+          </div>
+          <button id="btn-export-csv" class="btn-export-subtle" type="button" aria-label="Unduh Rekap CSV">📥 Unduh CSV</button>
         </div>
       </div>
 
