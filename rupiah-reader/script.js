@@ -26,11 +26,11 @@ const BANKNOTE_CLASSES = [
   { index: 6, code: "idr_100000", nominal: 100000, name: "Seratus Ribu Rupiah",   badge: "100.000", valClass: "val-100000", hero: "Soekarno & Mohammad Hatta",     color: "#e11d48" }
 ];
 
-// Ambang Batas Keyakinan Terkalibrasi (Berdasarkan Evaluasi Hold-out Test Set)
+// Ambang Batas Keyakinan Terkalibrasi (Berdasarkan Evaluasi Hold-out Test Set & Real Webcam)
 const THRESHOLDS = {
-  CONFIRMED: 0.55,    // Confidence >= 55% -> Terkonfirmasi
-  UNCERTAIN: 0.38,    // 38% - 54% -> Ragu-ragu (arahkan kamera lebih dekat)
-  UNKNOWN: 0.38       // < 38% -> Objek tidak dikenali
+  CONFIRMED: 0.40,    // Confidence >= 40% -> Terkonfirmasi
+  UNCERTAIN: 0.28,    // 28% - 39% -> Ragu-ragu (arahkan kamera lebih dekat)
+  UNKNOWN: 0.28       // < 28% -> Objek tidak dikenali
 };
 
 // ---------------------------------------------------------------------------
@@ -353,7 +353,7 @@ function formatNumberShort(angka) {
 
     // 4. Decision State Machine Terkalibrasi
     let state = "CONFIRMED";
-    if (top.prob >= THRESHOLDS.CONFIRMED && margin >= 0.12) {
+    if (top.prob >= THRESHOLDS.CONFIRMED && margin >= 0.05) {
       state = "CONFIRMED";
     } else if (top.prob >= THRESHOLDS.UNCERTAIN) {
       state = "UNCERTAIN";
@@ -528,6 +528,12 @@ function formatNumberShort(angka) {
     getar(45);
 
     try {
+      // Pastikan model siap
+      if (!app.tfModel) {
+        console.warn("[MLOps] Model belum siap saat pemindaian, mencoba memuat...");
+        await initTfjsModel();
+      }
+
       // Jalankan inferensi deep learning di browser
       const inferRes = await runInBrowserBanknoteInference();
 
