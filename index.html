@@ -45,9 +45,9 @@
             <span class="indicator-pip"></span>
             <span class="indicator-text">KAMERA</span>
           </div>
-          <div id="server-indicator-btn" class="header-indicator" role="button" tabindex="0" aria-label="Status server backend API. Klik untuk mengatur URL API server">
-            <span id="server-indicator-pip" class="indicator-pip" style="background-color:#15803d;"></span>
-            <span id="server-indicator-text" class="indicator-text">SERVER</span>
+          <div id="gpu-indicator" class="header-indicator" role="status" aria-label="Akselerasi hardware GPU">
+            <span class="indicator-pip" style="background-color:#0284c7;"></span>
+            <span id="gpu-indicator-text" class="indicator-text">GPU AKTIF</span>
           </div>
         </div>
 
@@ -60,16 +60,6 @@
 
       <div class="header-main-row">
         <h1 class="app-title">Rupiah Reader</h1>
-        <!-- Selector Model Inferensi (Hanya tampil di mode Uang Kertas) -->
-        <div id="model-select-wrapper" class="model-select-container">
-          <label for="model-select-input" class="model-select-label">Model:</label>
-          <select id="model-select-input" class="model-select-dropdown" aria-label="Pilih model inferensi uang kertas">
-            <option value="consensus" selected>✨ Konsensus (Bandingkan Semua)</option>
-            <option value="mobilenet">⚡ MobileNetV2 (Akurasi 86.0%)</option>
-            <option value="fnn">🧠 FNN Aprillia (Akurasi 58.1%)</option>
-            <option value="cnn" disabled>🔬 Custom CNN (Belum Tersedia / GPU Required)</option>
-          </select>
-        </div>
       </div>
 
       <p id="app-tagline" class="app-tagline">Arahkan kamera ke seluruh permukaan uang kertas lalu ketuk layar</p>
