@@ -1,0 +1,11 @@
+# Runtime dependencies for Rupiah Banknote Serving
+tensorflow==2.16.1
+keras==3.13.2
+fastapi==0.104.1
+uvicorn==0.24.0
+httpx==0.28.1
+pillow==10.4.0
+numpy==1.26.4
+pydantic==2.10.6
+scikit-learn==1.6.1
+

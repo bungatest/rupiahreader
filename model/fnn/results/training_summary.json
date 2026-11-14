@@ -1,0 +1,111 @@
+{
+  "selected_model": "fnn_tuned_no_aug",
+  "classes": [
+    "idr_1000",
+    "idr_2000",
+    "idr_5000",
+    "idr_10000",
+    "idr_20000",
+    "idr_50000",
+    "idr_100000"
+  ],
+  "dataset_commit": "tidak diketahui (salinan ZIP lokal)",
+  "images": {
+    "found": 1249,
+    "valid": 1249,
+    "excluded": 0,
+    "unique_used": 1249,
+    "train": 894,
+    "val": 176,
+    "test": 179
+  },
+  "near_duplicate": {
+    "threshold": 6,
+    "groups": 1126,
+    "images_in_multi_groups": 187
+  },
+  "selected_val_accuracy": 0.5681818127632141,
+  "selected_val_ci": [
+    0.49431631157187883,
+    0.6391344584390642
+  ],
+  "final_test": {
+    "accuracy": 0.5865921974182129,
+    "ci95": [
+      0.5133697307081447,
+      0.6561759306730727
+    ],
+    "top2": 0.7541899681091309,
+    "loss": 1.5934947729110718,
+    "macro_precision": 0.45149859943977594,
+    "macro_recall": 0.5632712215320911,
+    "macro_f1": 0.48519781376924226,
+    "n": 179
+  },
+  "lighting_robustness": {
+    "gelap (0.75x)": {
+      "accuracy": 0.1731843501329422,
+      "ci": [
+        0.1247727174194942,
+        0.23532914123849175
+      ]
+    },
+    "normal (1.00x)": {
+      "accuracy": 0.5865921974182129,
+      "ci": [
+        0.5133697307081447,
+        0.6561759306730727
+      ]
+    },
+    "terang (1.25x)": {
+      "accuracy": 0.16759777069091797,
+      "ci": [
+        0.11999298633240804,
+        0.2291704425590477
+      ]
+    }
+  },
+  "class_weight_used": false,
+  "quick_test_mode": false,
+  "config": {
+    "seed": 42,
+    "classes": [
+      "idr_1000",
+      "idr_2000",
+      "idr_5000",
+      "idr_10000",
+      "idr_20000",
+      "idr_50000",
+      "idr_100000"
+    ],
+    "img_size": [
+      224,
+      224
+    ],
+    "split_ratios": [
+      0.7,
+      0.15,
+      0.15
+    ],
+    "n_group_folds": 20,
+    "near_dup_threshold": 6,
+    "resize_mode": "pad",
+    "n_workers": 8,
+    "batch_size": 32,
+    "baseline_epochs": 15,
+    "tuning_epochs": 30,
+    "baseline_lr": 0.001,
+    "tuning_lr": 0.0005,
+    "patience": 8,
+    "repo_url": "https://github.com/mkaspulanwar/rupiah-banknotes-dataset.git",
+    "data_root_override": "C:/Users/Bunga Alyssa/OneDrive/\u6587\u6863/DS/smt  7/deep l/uas/frontend/rupiah-banknotes-dataset-main",
+    "quick_test": false
+  },
+  "environment": {
+    "os": "Windows 11",
+    "python": "3.12.10",
+    "tensorflow": "2.16.1",
+    "numpy": "1.26.4",
+    "pandas": "2.3.3"
+  }
+}

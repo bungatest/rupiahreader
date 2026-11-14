@@ -1,0 +1,14 @@
+{
+  "total_unique_images": 89,
+  "sisi_angka_count": 55,
+  "sisi_garuda_count": 34,
+  "garuda_percentage": 38.2,
+  "theoretical_ceiling_pct": 71.35,
+  "realistic_ceiling_pct": 58.99,
+  "optimal_temperature_T": 0.8,
+  "ece_before_scaling": 0.0963,
+  "ece_after_scaling": 0.1673,
+  "oof_calibrated_threshold": 0.86,
+  "oof_precision_at_threshold": 0.9,
+  "oof_coverage_at_threshold": 0.1316
+}

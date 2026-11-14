@@ -1,0 +1,12 @@
+﻿python : 2026-11-01 10:12:27.243973: I tensorflow/core/util/port.cc:113] oneDNN custom operations are on. You may see 
+slightly different numerical results due to floating-point round-off errors from different computation orders. To turn 
+them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+At line:1 char:87
++ ... CALAPPDATA; python model_coins\eval_clean_experiments.py *>&1 | Out-F ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (2026-11-01 10:1...ONEDNN_OPTS=0`.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+2026-11-01 10:12:29.348484: I tensorflow/core/util/port.cc:113] oneDNN custom operations are on. You may see slightly 
+different numerical results due to floating-point round-off errors from different computation orders. To turn them 
+off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.

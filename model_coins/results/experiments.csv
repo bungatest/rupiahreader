@@ -1,0 +1,4 @@
+Model,OOF Accuracy,Wilson 95% CI,Macro F1,Macro Precision,Macro Recall
+Custom_CNN,30.26%,"[21.1%, 41.3%]",0.2505,0.2488,0.278
+MobileNetV2,36.84%,"[26.9%, 48.1%]",0.3309,0.3473,0.3457
+EfficientNetV2B0,52.63%,"[41.6%, 63.5%]",0.5149,0.545,0.5381

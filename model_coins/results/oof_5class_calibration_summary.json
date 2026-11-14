@@ -1,0 +1,115 @@
+{
+  "N_total_unique": 89,
+  "N_sisi_angka": 55,
+  "N_sisi_garuda": 34,
+  "accuracy_total_oof": 0.6741573033707865,
+  "ci_total_oof": [
+    0.5713,
+    0.7626
+  ],
+  "accuracy_angka_oof": 0.6181818181818182,
+  "ci_angka_oof": [
+    0.4861,
+    0.7348
+  ],
+  "accuracy_garuda_oof": 0.7647058823529411,
+  "ci_garuda_oof": [
+    0.6,
+    0.8756
+  ],
+  "optimal_temperature_T": 0.663,
+  "ece_uncalibrated": 0.16253262122025652,
+  "ece_calibrated": 0.11616655380538339,
+  "risk_coverage_table": [
+    {
+      "threshold": 0.3,
+      "answered_n": 87,
+      "total_N": 89,
+      "coverage_pct": 97.8,
+      "correct_k": 58,
+      "precision_pct": 66.7,
+      "wilson_ci_95": "[56.2%, 75.7%]"
+    },
+    {
+      "threshold": 0.4,
+      "answered_n": 82,
+      "total_N": 89,
+      "coverage_pct": 92.1,
+      "correct_k": 55,
+      "precision_pct": 67.1,
+      "wilson_ci_95": "[56.3%, 76.3%]"
+    },
+    {
+      "threshold": 0.5,
+      "answered_n": 65,
+      "total_N": 89,
+      "coverage_pct": 73.0,
+      "correct_k": 48,
+      "precision_pct": 73.8,
+      "wilson_ci_95": "[62.1%, 83.0%]"
+    },
+    {
+      "threshold": 0.6,
+      "answered_n": 46,
+      "total_N": 89,
+      "coverage_pct": 51.7,
+      "correct_k": 38,
+      "precision_pct": 82.6,
+      "wilson_ci_95": "[69.3%, 90.9%]"
+    },
+    {
+      "threshold": 0.65,
+      "answered_n": 41,
+      "total_N": 89,
+      "coverage_pct": 46.1,
+      "correct_k": 36,
+      "precision_pct": 87.8,
+      "wilson_ci_95": "[74.5%, 94.7%]"
+    },
+    {
+      "threshold": 0.7,
+      "answered_n": 31,
+      "total_N": 89,
+      "coverage_pct": 34.8,
+      "correct_k": 30,
+      "precision_pct": 96.8,
+      "wilson_ci_95": "[83.8%, 99.4%]"
+    },
+    {
+      "threshold": 0.75,
+      "answered_n": 27,
+      "total_N": 89,
+      "coverage_pct": 30.3,
+      "correct_k": 27,
+      "precision_pct": 100.0,
+      "wilson_ci_95": "[87.5%, 100.0%]"
+    },
+    {
+      "threshold": 0.8,
+      "answered_n": 24,
+      "total_N": 89,
+      "coverage_pct": 27.0,
+      "correct_k": 24,
+      "precision_pct": 100.0,
+      "wilson_ci_95": "[86.2%, 100.0%]"
+    },
+    {
+      "threshold": 0.85,
+      "answered_n": 15,
+      "total_N": 89,
+      "coverage_pct": 16.9,
+      "correct_k": 15,
+      "precision_pct": 100.0,
+      "wilson_ci_95": "[79.6%, 100.0%]"
+    },
+    {
+      "threshold": 0.9,
+      "answered_n": 8,
+      "total_N": 89,
+      "coverage_pct": 9.0,
+      "correct_k": 8,
+      "precision_pct": 100.0,
+      "wilson_ci_95": "[67.6%, 100.0%]"
+    }
+  ]
+}
