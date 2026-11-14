@@ -1,8 +1,8 @@
 /* ==========================================================================
    Rupiah Reader – style.css
    Kamera Seluruh Layar (Full-Screen Viewport), Tema Kontras Tinggi (WCAG AAA >= 7:1),
-   Desain Simpel, Bersih, & Responsif Sempurna di Handphone, Tablet, dan Laptop.
-   Tap Anywhere >= 60dvh, Target Sentuh >= 72px, Fokus Terlihat Jelas.
+   Aksesibilitas Khusus Tunanetra & Low Vision (Tanpa Frame Bidik, Tanpa Toggle Rumit).
+   Tap Anywhere >= 60dvh, Target Sentuh >= 72px, Audio id-ID Otomatis.
    ========================================================================== */
 
 :root {
@@ -41,7 +41,7 @@
 }
 
 html {
-  background-color: #ffffff;
+  background-color: #000000;
   color: #000000;
   font-family: var(--font-main);
   line-height: 1.4;
@@ -55,8 +55,7 @@ body {
   height: 100dvh;
   min-height: 100vh;
   min-height: 100dvh;
-  background-color: #ffffff;
-  background-image: linear-gradient(180deg, #ffffff 0%, #f1f5f9 100%);
+  background-color: #000000;
   color: #000000;
   overflow: hidden;
   margin: 0;
@@ -108,7 +107,7 @@ body {
 
 /* --------------------------------------------------------------------------
    PANGGUNG KAMERA PENUH SE-LAYAR (FULLSCREEN CAMERA VIEWPORT)
-   Seluruh layar adalah kamera di semua perangkat (Phone, Tablet, Laptop)
+   Seluruh layar adalah kamera tanpa batasan frame visual
    -------------------------------------------------------------------------- */
 .stage-fullscreen {
   position: fixed;
@@ -119,8 +118,6 @@ body {
   z-index: 1;
   overflow: hidden;
   background-color: #000000;
-  background-image: radial-gradient(circle, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
-  background-size: 24px 24px;
 }
 
 #camera-preview {
@@ -134,7 +131,7 @@ body {
 }
 
 /* --------------------------------------------------------------------------
-   TAP ANYWHERE (Meliputi Seluruh Layar, >= 60dvh)
+   TAP ANYWHERE (Meliputi Seluruh Layar)
    -------------------------------------------------------------------------- */
 #tap-area {
   position: fixed;
@@ -142,7 +139,7 @@ body {
   width: 100vw;
   height: 100vh;
   height: 100dvh;
-  min-height: 60dvh;
+  min-height: 100dvh;
   z-index: 2;
   display: flex;
   align-items: center;
@@ -159,141 +156,53 @@ body {
 }
 
 #tap-area:active {
-  color: #000000;
   transform: scale(0.99);
 }
 
-/* Bingkai Viewfinder Pemindaian di Tengah Kamera (Bentuk Lingkaran Koin) */
-.viewfinder-frame {
-  position: relative;
-  width: min(220px, 58vw);
-  height: min(220px, 58vw);
-  border: 4px dashed #ffff00;
-  border-radius: 50%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-  background-color: rgba(0, 0, 0, 0.25);
-  box-shadow: 0 0 28px rgba(0, 0, 0, 0.6);
-  margin-top: -30px; /* Offset optis agar seimbang di atas panel hasil */
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+/* Sembunyikan semua bingkai bidik visual (Tunanetra tidak butuh bingkai bidik) */
+.viewfinder-frame,
+.viewfinder-corner,
+.viewfinder-laser,
+.mode-switch-group,
+.field-eval-panel,
+.feedback-dialog {
+  display: none !important;
 }
 
-/* 4 Sudut Tegas (Corner Brackets) */
-.viewfinder-corner {
-  position: absolute;
-  width: 18px;
-  height: 18px;
-  border-color: #ffff00;
-  border-style: solid;
-  pointer-events: none;
-}
-
-.corner-tl {
-  top: -3px;
-  left: -3px;
-  border-width: 4px 0 0 4px;
-  border-top-left-radius: 16px;
-}
-
-.corner-tr {
-  top: -3px;
-  right: -3px;
-  border-width: 4px 4px 0 0;
-  border-top-right-radius: 16px;
-}
-
-.corner-bl {
-  bottom: -3px;
-  left: -3px;
-  border-width: 0 0 4px 4px;
-  border-bottom-left-radius: 16px;
-}
-
-.corner-br {
-  bottom: -3px;
-  right: -3px;
-  border-width: 0 4px 4px 0;
-  border-bottom-right-radius: 16px;
-}
-
-/* Garis Laser Pindai */
-.viewfinder-laser {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
-  background-color: #ffff00;
-  box-shadow: 0 0 14px #ffff00;
-  opacity: 0;
-  pointer-events: none;
-}
-
-/* Kartu Petunjuk Ringkas Terapung di Tengah Viewfinder */
+/* Kartu Petunjuk Terapung Elegan di Tengah Kamera */
 .tap-card {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
-  padding: 4px 12px;
-  background-color: #ffffff;
+  gap: 4px;
+  padding: 10px 22px;
+  background-color: rgba(255, 255, 255, 0.94);
   color: #000000;
-  border: 2px solid #000000;
-  border-radius: 10px;
+  border: 3px solid #000000;
+  border-radius: 16px;
   max-width: 90%;
   pointer-events: none;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(6px);
+  margin-top: -30px;
 }
 
 .reticle-glyph {
-  font-size: 1.25rem;
+  font-size: 1.6rem;
   line-height: 1;
   color: #000000;
-  background-color: #ffffff;
 }
 
 .tap-main-text {
   font-family: var(--font-display);
-  font-size: clamp(0.9rem, 3vw, 1.05rem);
+  font-size: clamp(0.95rem, 3.2vw, 1.15rem);
   font-weight: 900;
   color: #000000;
-  background-color: #ffffff;
   line-height: 1.15;
 }
 
-.tap-hint-text {
-  font-size: 0.75rem;
-  font-weight: 900;
-  color: #000000;
-  background-color: #ffffff;
-  letter-spacing: 0.01em;
-  white-space: nowrap;
-}
-
-/* State Hook: Scanning (Animasi Laser & Denyut Aman) */
-[data-state="scanning"] .viewfinder-frame {
-  border-style: solid;
-  border-color: #ffff00;
-  box-shadow: 0 0 32px rgba(255, 255, 0, 0.6);
-  animation: scanPulse 1.4s infinite ease-in-out;
-}
-
-[data-state="scanning"] .viewfinder-laser {
-  opacity: 1;
-  animation: laserSweep 1.6s infinite ease-in-out;
-}
-
-[data-state="scanning"] .reticle-glyph {
-  color: #000000;
-  background-color: #ffffff;
-}
-
 /* --------------------------------------------------------------------------
-   LAPISAN HUD TERAPUNG RESPONSIF (HANDPHONE, TABLET, LAPTOP)
-   Tetap terapung di atas video kamera, tidak menutupi kamera secara masif
+   LAPISAN HUD TERAPUNG RESPONSIF
    -------------------------------------------------------------------------- */
 .hud-layer {
   position: fixed;
@@ -306,104 +215,120 @@ body {
   flex-direction: column;
   justify-content: space-between;
   align-items: center;
-  padding-top: max(8px, env(safe-area-inset-top));
-  padding-right: max(12px, env(safe-area-inset-right));
-  padding-bottom: max(10px, env(safe-area-inset-bottom));
-  padding-left: max(12px, env(safe-area-inset-left));
-  pointer-events: none; /* Biarkan ketukan pada area bebas menembus ke tap-area */
+  padding-top: max(10px, env(safe-area-inset-top));
+  padding-right: max(14px, env(safe-area-inset-right));
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  padding-left: max(14px, env(safe-area-inset-left));
+  pointer-events: none;
   overflow-x: hidden;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
 
 .app-header,
-.main-panel-card,
-.app-footer {
-  pointer-events: auto; /* Tombol dan kartu dapat diinteraksikan */
+.main-panel-card {
+  pointer-events: auto;
 }
 
 /* --------------------------------------------------------------------------
-   Header Aplikasi Terapung (Kompak & Bersih di Atas Layar)
+   Header Aplikasi Terapung
    -------------------------------------------------------------------------- */
 .app-header {
   width: 100%;
   max-width: 480px;
   margin: 0 auto;
-  padding: 8px 14px;
+  padding: 10px 16px;
   background-color: #ffffff;
   color: #000000;
   border: 3px solid #000000;
-  border-radius: 14px;
+  border-radius: 16px;
   text-align: center;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-  animation: revealHeader 0.5s ease-out;
-  animation-delay: 0ms;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  animation: revealHeader 0.4s ease-out;
+}
+
+.header-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  margin-bottom: 6px;
+}
+
+.indicators-group {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
 .header-indicator {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 10px;
+  padding: 4px 12px;
   background-color: #ffffff;
   color: #000000;
   border: 2px solid #000000;
   border-radius: 16px;
-  margin-bottom: 2px;
   cursor: pointer;
 }
 
 .indicator-pip {
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   background-color: #15803d;
 }
 
 [data-camera="error"] .indicator-pip {
-  background-color: #ffff00;
+  background-color: #ef4444;
 }
 
 .indicator-text {
-  font-size: 0.75rem;
+  font-size: 0.78rem;
   font-weight: 900;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
   color: #000000;
-  background-color: #ffffff;
+}
+
+.header-main-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
 }
 
 .app-title {
   font-family: var(--font-display);
-  font-size: clamp(1.2rem, 3.5vw, 1.55rem);
+  font-size: clamp(1.3rem, 4vw, 1.7rem);
   font-weight: 900;
   letter-spacing: 0.03em;
   color: #000000;
-  background-color: #ffffff;
   text-transform: uppercase;
   line-height: 1.1;
 }
 
 .app-tagline {
-  font-size: 0.8rem;
+  font-size: 0.85rem;
   font-weight: 700;
-  color: #000000;
-  background-color: #ffffff;
-  margin-top: 2px;
+  color: #111111;
+  margin-top: 4px;
+  line-height: 1.3;
 }
 
-/* Notifikasi Izin Kamera / Protokol Localhost */
 .camera-notice-banner {
-  margin-top: 6px;
-  padding: 6px 10px;
+  margin-top: 8px;
+  padding: 8px 12px;
   background-color: #000000;
   color: #ffffff;
   border: 2px solid #ffff00;
   border-radius: 10px;
-  font-size: 0.8rem;
+  font-size: 0.85rem;
   font-weight: 700;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   align-items: center;
   text-align: center;
 }
@@ -413,29 +338,19 @@ body {
 }
 
 .notice-link-btn {
-  padding: 4px 10px;
+  padding: 6px 14px;
   background-color: #ffff00;
   color: #000000;
   border: 2px solid #000000;
-  border-radius: 6px;
+  border-radius: 8px;
   font-family: var(--font-main);
   font-weight: 900;
-  font-size: 0.8rem;
+  font-size: 0.85rem;
   cursor: pointer;
-  user-select: none;
-  transition: transform 0.1s ease;
-}
-
-.notice-link-btn:hover,
-.notice-link-btn:active {
-  background-color: #ffffff;
-  color: #000000;
-  transform: scale(0.97);
 }
 
 /* --------------------------------------------------------------------------
    Main Panel: Kotak Hasil & Total Display (Terapung di Bawah Layar)
-   Selalu terlihat di semua layar (Handphone, Tablet, Laptop)
    -------------------------------------------------------------------------- */
 .app-main {
   width: 100%;
@@ -450,39 +365,36 @@ body {
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 /* Kotak Hasil: Wajib Latar #000000 Pekat + Teks Nominal #FFFF00 Raksasa */
 .result-display {
   background-color: #000000;
   border: 5px solid #ffff00;
-  border-radius: 16px;
-  padding: 8px 14px;
+  border-radius: 18px;
+  padding: 10px 16px;
   text-align: center;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.7);
-  animation: revealResult 0.5s ease-out;
-  animation-delay: 80ms;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.75);
+  animation: revealResult 0.4s ease-out;
   overflow: hidden;
 }
 
 .result-title {
-  font-size: 0.82rem;
+  font-size: 0.85rem;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: #ffffff;
-  background-color: #000000;
   margin-bottom: 2px;
 }
 
 .result-number {
   font-family: var(--font-display);
-  font-size: clamp(1.8rem, 6.8vw, 3.2rem);
+  font-size: clamp(2rem, 7.5vw, 3.4rem);
   font-weight: 900;
   line-height: 1.1;
   color: #ffff00;
-  background-color: #000000;
   font-variant-numeric: lining-nums tabular-nums;
   letter-spacing: -0.02em;
   white-space: nowrap;
@@ -492,117 +404,55 @@ body {
   width: 100%;
 }
 
+.inference-meta {
+  margin-top: 6px;
+  font-size: 0.88rem;
+  color: #ffff00;
+  font-weight: 700;
+  min-height: 20px;
+  text-align: center;
+}
+
 /* Ringkasan Total Akumulasi (Tema Terang Kontras Tinggi) */
 .total-wrapper {
   background-color: #ffffff;
   color: #000000;
   border: 3px solid #000000;
-  border-radius: 14px;
-  padding: 8px 16px;
+  border-radius: 16px;
+  padding: 10px 18px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-}
-
-.total-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.btn-export-subtle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 14px;
-  background-color: #f8fafc;
-  color: #000000;
-  font-size: 0.85rem;
-  font-weight: 900;
-  border: 2px solid #000000;
-  border-radius: 12px;
-  cursor: pointer;
-  text-decoration: none;
-  white-space: nowrap;
-  transition: background-color 0.15s ease, transform 0.1s ease;
-}
-
-.btn-export-subtle:active {
-  background-color: #e2e8f0;
-  transform: scale(0.96);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
 }
 
 .total-value {
   font-family: var(--font-display);
-  font-size: clamp(1.1rem, 3.2vw, 1.4rem);
+  font-size: clamp(1.15rem, 3.5vw, 1.45rem);
   font-weight: 900;
   color: #000000;
-  background-color: #ffffff;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
 .total-gesture-hint {
-  font-size: 0.82rem;
+  font-size: 0.85rem;
   font-weight: 900;
   color: #000000;
-  background-color: #ffffff;
   text-align: right;
   white-space: nowrap;
 }
 
 /* --------------------------------------------------------------------------
-   Footer Tombol Aksi (Disembunyikan dari Tampilan Visual agar Bersih Penuh)
+   Footer Tombol Aksi
    -------------------------------------------------------------------------- */
 .app-footer {
   display: none !important;
 }
 
-.action-btn {
-  flex: 1 1 0;
-  min-height: 72px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 10px 14px;
-  font-family: var(--font-main);
-  font-size: 1.5rem;
-  font-weight: 900;
-  color: #000000;
-  background-color: #ffffff;
-  border: 4px solid #000000;
-  border-radius: 16px;
-  cursor: pointer;
-  user-select: none;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
-  -webkit-tap-highlight-color: transparent;
-  transition: transform 0.15s ease, background-color 0.2s ease, color 0.2s ease;
-}
-
-.btn-glyph {
-  font-size: 1.7rem;
-  line-height: 1;
-}
-
-.btn-label {
-  line-height: 1.1;
-  white-space: nowrap;
-}
-
-.btn-repeat-style:hover,
-.btn-repeat-style:active,
-.btn-add-style:hover,
-.btn-add-style:active {
-  background-color: #000000;
-  color: #ffffff;
-  transform: scale(0.97);
-}
-
 /* --------------------------------------------------------------------------
-   Orkestrasi Animasi Pemuatan & Denyut
+   Animasi Muncul
    -------------------------------------------------------------------------- */
 @keyframes revealHeader {
   from { opacity: 0; transform: translateY(-16px); }
@@ -614,114 +464,27 @@ body {
   to { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes revealFooter {
-  from { opacity: 0; transform: translateY(16px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes scanPulse {
-  0% {
-    box-shadow: 0 0 16px rgba(255, 255, 0, 0.4);
-  }
-  50% {
-    box-shadow: 0 0 36px rgba(255, 255, 0, 0.8);
-  }
-  100% {
-    box-shadow: 0 0 16px rgba(255, 255, 0, 0.4);
-  }
-}
-
-@keyframes laserSweep {
-  0% {
-    top: 0;
-  }
-  50% {
-    top: calc(100% - 3px);
-  }
-  100% {
-    top: 0;
-  }
-}
-
 /* --------------------------------------------------------------------------
-   RESPONSIF TABLET (768px - 1023px)
-   Kamera tetap memenuhi seluruh layar, kontrol tertata rapi di tengah
+   Responsif Tablet & Desktop
    -------------------------------------------------------------------------- */
-@media (min-width: 768px) and (max-width: 1023px) {
-  .app-header {
-    max-width: 540px;
-    padding: 10px 18px;
-  }
-
-  .viewfinder-frame {
-    width: clamp(320px, 48vw, 440px);
-    height: clamp(160px, 20vh, 220px);
-  }
-
+@media (min-width: 768px) {
+  .app-header,
+  .app-main,
   .main-panel-card {
-    max-width: 540px;
-  }
-
-  .app-main {
-    max-width: 540px;
+    max-width: 560px;
   }
 }
 
-/* --------------------------------------------------------------------------
-   RESPONSIF LAPTOP / DESKTOP (>= 1024px)
-   Seluruh layar tetap kamera penuh (Full Screen Viewport).
-   HUD terapung simetris di tengah tanpa kolom yang memecah layar.
-   -------------------------------------------------------------------------- */
-@media (min-width: 1024px) {
-  .hud-layer {
-    padding-top: 16px;
-    padding-bottom: 16px;
-  }
-
-  .app-header {
-    max-width: 540px;
-    padding: 10px 20px;
-  }
-
-  .viewfinder-frame {
-    width: clamp(340px, 35vw, 460px);
-    height: clamp(160px, 20vh, 220px);
-  }
-
-  .app-main {
-    max-width: 540px;
-  }
-
-  .main-panel-card {
-    max-width: 540px;
-  }
-}
-
-/* --------------------------------------------------------------------------
-   Prefers-Contrast & Prefers-Reduced-Motion
-   -------------------------------------------------------------------------- */
 @media (prefers-contrast: more) {
-  .viewfinder-frame {
-    border-width: 6px;
-    border-color: #ffff00;
-  }
-
   .result-display {
     border-width: 8px;
     border-color: #ffff00;
   }
-
   .app-header,
   .tap-card,
-  .total-wrapper,
-  .action-btn {
+  .total-wrapper {
     border-width: 5px;
     border-color: #000000;
-  }
-
-  :focus-visible {
-    outline-width: 6px;
-    outline-offset: 6px;
   }
 }
 
@@ -730,323 +493,4 @@ body {
     animation: none !important;
     transition: none !important;
   }
-}
-
-
-/* ==========================================================================
-   Rupiah Reader – Ekstensi Mode Uang Kertas & Panel Uji Lapangan
-   ========================================================================== */
-
-/* Baris Atas Header: Indikator & Mode Tabs */
-.header-top-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-
-.mode-switch-group {
-  display: inline-flex;
-  background: #000000;
-  border: 3px solid #ffff00;
-  border-radius: 999px;
-  padding: 3px;
-  gap: 4px;
-}
-
-.mode-tab {
-  background: transparent;
-  color: #ffffff;
-  border: none;
-  border-radius: 999px;
-  padding: 8px 16px;
-  font-family: var(--font-main);
-  font-size: 0.95rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.15s ease-in-out;
-  min-height: 44px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.mode-tab.active,
-.mode-tab[aria-selected="true"] {
-  background: #ffff00;
-  color: #000000;
-  box-shadow: 0 2px 8px rgba(255, 255, 0, 0.4);
-}
-
-.header-main-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px;
-  width: 100%;
-}
-
-.model-select-container {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: rgba(0, 0, 0, 0.85);
-  padding: 4px 10px;
-  border: 2px solid #ffff00;
-  border-radius: 8px;
-}
-
-.model-select-label {
-  color: #ffff00;
-  font-size: 0.85rem;
-  font-weight: 700;
-}
-
-.model-select-dropdown {
-  background: #000000;
-  color: #ffffff;
-  border: 1px solid #ffff00;
-  border-radius: 4px;
-  padding: 6px 8px;
-  font-family: var(--font-main);
-  font-size: 0.85rem;
-  font-weight: 700;
-  cursor: pointer;
-  max-width: 260px;
-}
-
-.model-select-dropdown:focus {
-  outline: 3px solid #ffff00;
-}
-
-/* Viewfinder Adaptif 2.2:1 (Proporsi Uang Kertas Rupiah) */
-.viewfinder-frame.frame-banknote {
-  width: min(88vw, 420px);
-  aspect-ratio: 2.2 / 1;
-  height: auto;
-  border-radius: 12px;
-}
-
-.viewfinder-frame.frame-coin {
-  display: none !important;
-}
-
-/* Inference Metadata & Consensus Breakdown */
-.inference-meta {
-  margin-top: 8px;
-  font-size: 0.9rem;
-  color: #ffff00;
-  font-weight: 700;
-  min-height: 20px;
-  text-align: center;
-}
-
-/* Panel Uji Lapangan (Field Testing Ground Truth) */
-.field-eval-panel {
-  margin-top: 12px;
-  padding: 10px 12px;
-  background: #111111;
-  border: 2px solid #ffff00;
-  border-radius: 10px;
-  width: 100%;
-}
-
-.field-eval-prompt {
-  color: #ffffff;
-  font-size: 0.85rem;
-  font-weight: 700;
-  margin-bottom: 8px;
-  text-align: center;
-}
-
-.nominal-tag-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
-  margin-bottom: 10px;
-}
-
-@media (min-width: 480px) {
-  .nominal-tag-grid {
-    grid-template-columns: repeat(7, 1fr);
-  }
-}
-
-.btn-tag {
-  background: #222222;
-  color: #ffff00;
-  border: 2px solid #ffff00;
-  border-radius: 6px;
-  padding: 8px 4px;
-  font-family: var(--font-main);
-  font-size: 0.85rem;
-  font-weight: 900;
-  cursor: pointer;
-  min-height: 44px;
-  transition: all 0.15s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.btn-tag:hover,
-.btn-tag:focus-visible {
-  background: #ffff00;
-  color: #000000;
-  outline: 3px solid #ffffff;
-}
-
-.btn-tag.selected-correct {
-  background: #15803d !important;
-  color: #ffffff !important;
-  border-color: #22c55e !important;
-}
-
-.btn-tag.selected-wrong {
-  background: #b91c1c !important;
-  color: #ffffff !important;
-  border-color: #ef4444 !important;
-}
-
-.field-footer-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding-top: 6px;
-  border-top: 1px solid #333333;
-}
-
-.stat-badge {
-  color: #ffff00;
-  font-size: 0.85rem;
-  font-weight: 700;
-}
-
-.stat-link,
-.stat-feedback-btn {
-  background: #000000;
-  color: #ffff00;
-  border: 1px solid #ffff00;
-  border-radius: 6px;
-  padding: 6px 10px;
-  font-size: 0.8rem;
-  font-weight: 700;
-  text-decoration: none;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-}
-
-.stat-link:hover,
-.stat-feedback-btn:hover {
-  background: #ffff00;
-  color: #000000;
-}
-
-/* Modal Feedback Kontras Tinggi */
-.feedback-dialog {
-  background: #000000;
-  color: #ffffff;
-  border: 4px solid #ffff00;
-  border-radius: 14px;
-  padding: 24px;
-  max-width: 90vw;
-  width: 480px;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.9);
-}
-
-.feedback-dialog::backdrop {
-  background: rgba(0, 0, 0, 0.8);
-}
-
-.feedback-dialog-title {
-  color: #ffff00;
-  font-family: var(--font-display);
-  font-size: 1.4rem;
-  margin-bottom: 6px;
-}
-
-.feedback-dialog-desc {
-  color: #dddddd;
-  font-size: 0.95rem;
-  margin-bottom: 16px;
-}
-
-.feedback-field-label {
-  display: block;
-  font-weight: 700;
-  margin-bottom: 6px;
-  color: #ffff00;
-}
-
-.feedback-textarea {
-  width: 100%;
-  background: #111111;
-  color: #ffffff;
-  border: 2px solid #ffff00;
-  border-radius: 8px;
-  padding: 10px;
-  font-family: var(--font-main);
-  font-size: 1rem;
-  margin-bottom: 16px;
-}
-
-.feedback-checkbox-wrapper {
-  margin-bottom: 20px;
-}
-
-.feedback-checkbox-label {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  cursor: pointer;
-  font-size: 0.95rem;
-  color: #ffffff;
-}
-
-.feedback-checkbox-label input {
-  width: 22px;
-  height: 22px;
-  accent-color: #ffff00;
-  margin-top: 2px;
-}
-
-.feedback-privacy-note {
-  font-size: 0.8rem;
-  color: #aaaaaa;
-  margin-top: 6px;
-  padding-left: 32px;
-}
-
-.feedback-dialog-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-}
-
-.btn-dialog-secondary {
-  background: #222222;
-  color: #ffffff;
-  border: 2px solid #888888;
-  border-radius: 8px;
-  padding: 10px 18px;
-  font-weight: 700;
-  cursor: pointer;
-  min-height: 44px;
-}
-
-.btn-dialog-primary {
-  background: #ffff00;
-  color: #000000;
-  border: 2px solid #ffff00;
-  border-radius: 8px;
-  padding: 10px 22px;
-  font-weight: 900;
-  cursor: pointer;
-  min-height: 44px;
 }

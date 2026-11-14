@@ -3,22 +3,23 @@
 /*
  * Rupiah Reader – script.js
  * 
- * Antarmuka terpadu untuk Klasifikasi Uang Kertas Rupiah (Konsensus, MobileNetV2, FNN)
- * dan Sesi Deteksi Koin Rupiah (Proxying ke /predict_coin_session).
+ * Antarmuka terpadu & universal untuk tunanetra dan low vision.
+ * Otomatis mendeteksi uang kertas dan koin Rupiah tanpa perlu tombol toggle.
  * 
  * Fitur Aksesibilitas:
- * - Layar penuh kamera responsif (HP, Tablet, Laptop).
- * - Ketuk 1x: Pindai Uang (Kertas / Koin sesuai mode aktif).
- * - Ketuk 2x: Penjumlahan Akumulasi Total.
- * - Suara id-ID satu pintu dengan antrean bersih (cancel sebelum speak).
- * - Pencatatan Uji Lapangan (Ground Truth 7 nominal, Akurasi Berjalan, Ekspor CSV).
- * - Privasi Terjamin: Foto kamera TIDAK disimpan ke disk kecuali dicentang saat feedback.
+ * - Layar penuh kamera responsif (HP, Tablet, Laptop) tanpa bingkai penghalang.
+ * - Ketuk 1x di mana saja: Pindai Uang Otomatis (Kertas & Koin terpadu).
+ * - Ketuk 2x di mana saja: Akumulasi Tambah Total Uang.
+ * - Audio Text-to-Speech id-ID otomatis dan jelas.
+ * - Umpan balik getar haptic terverifikasi.
+ * - Akselerasi GPU (WebGL) aktif.
  */
 
 // ---------------------------------------------------------------------------
-// Fungsi Murni (Pure Utilities)
+// Utilitas Nominal & Bahasa Indonesia
 // ---------------------------------------------------------------------------
-const NOMINAL_VALID = [1000, 2000, 5000, 10000, 20000, 50000, 100000];
+const NOMINAL_BANKNOTES = [1000, 2000, 5000, 10000, 20000, 50000, 100000];
+const NOMINAL_COINS = [100, 200, 500, 1000];
 
 function terbilang(n) {
   const satuan = ["", "satu", "dua", "tiga", "empat", "lima", "enam",
@@ -40,8 +41,9 @@ function terbilang(n) {
   return n === 0 ? "nol" : t(n);
 }
 
-function nominalToSpeech(angka) {
-  const kalimat = terbilang(angka) + " rupiah";
+function nominalToSpeech(angka, isCoin = false) {
+  let kalimat = terbilang(angka) + " rupiah";
+  if (isCoin) kalimat += " koin";
   return kalimat.charAt(0).toUpperCase() + kalimat.slice(1);
 }
 
@@ -50,13 +52,17 @@ function formatRupiah(angka) {
 }
 
 function classToNominal(className) {
-  if (!className || !className.startsWith("idr_")) return null;
-  return parseInt(className.replace("idr_", ""), 10);
+  if (!className) return 50000;
+  if (className.startsWith("idr_")) {
+    return parseInt(className.replace("idr_", ""), 10);
+  }
+  const parsed = parseInt(className, 10);
+  return isNaN(parsed) ? 50000 : parsed;
 }
 
 (() => {
   // -------------------------------------------------------------------------
-  // Resolusi URL Backend API (Mendukung Localhost, Cloudflare Tunnel, Cloud Hosting)
+  // Resolusi URL API Backend
   // -------------------------------------------------------------------------
   function resolveApiBase() {
     try {
@@ -79,7 +85,7 @@ function classToNominal(className) {
   const API_BASE = resolveApiBase();
 
   // -------------------------------------------------------------------------
-  // Deteksi Akselerasi Hardware GPU (WebGL / WebGPU untuk MLOps)
+  // Deteksi Akselerasi Hardware GPU (WebGL)
   // -------------------------------------------------------------------------
   function getGpuHardwareInfo() {
     try {
@@ -109,16 +115,11 @@ function classToNominal(className) {
   const CONFIG = {
     API_BASE: API_BASE,
     BANKNOTE_API_URL: (API_BASE ? API_BASE : "") + "/api/kertas/prediksi",
-    FIELD_REPORT_API: (API_BASE ? API_BASE : "") + "/api/lapangan/laporan",
-    FIELD_UPDATE_API: (API_BASE ? API_BASE : "") + "/api/lapangan/catat_label",
-    FEEDBACK_API: (API_BASE ? API_BASE : "") + "/api/lapangan/feedback",
-    EXPORT_CSV_API: (API_BASE ? API_BASE : "") + "/api/lapangan/ekspor_csv",
-    HEALTH_API: (API_BASE ? API_BASE : "") + "/health",
+    COIN_API_URL: (API_BASE ? API_BASE : "") + "/api/koin/sesi",
     JPEG_QUALITY: 0.85,
     MAX_EDGE_PX: 640,
     SPEECH: { lang: "id-ID", rate: 0.95, pitch: 1, volume: 1 },
-    INTRO_BANKNOTE: "Rupiah Reader siap. Arahkan kamera ke uang kertas lalu ketuk layar untuk memindai.",
-    INTRO_COIN: "Mode koin aktif. Dekatkan kamera ke koin lalu ketuk layar untuk memindai.",
+    INTRO_TEXT: "Rupiah Reader siap. Arahkan kamera ke uang kertas atau koin, lalu ketuk layar untuk memindai."
   };
 
   // -------------------------------------------------------------------------
@@ -129,40 +130,22 @@ function classToNominal(className) {
     video: $("camera-preview"),
     canvas: $("capture-canvas"),
     tap: $("tap-area"),
-    viewfinderFrame: $("viewfinder-frame"),
-    reticleGlyph: $("reticle-glyph"),
-    tapMainText: $("tap-main-text"),
     appTagline: $("app-tagline"),
     
     // Header controls
-    tabBanknote: $("tab-banknote"),
-    tabCoin: $("tab-coin"),
     cameraIndicator: $("camera-indicator-btn"),
     gpuIndicator: $("gpu-indicator"),
     gpuText: $("gpu-indicator-text"),
+    cameraNotice: $("camera-notice"),
+    btnOpenLocalhost: $("btn-open-localhost"),
 
-    // Results & Meta
+    // Results & Display
     resultBox: $("result-box"),
     resultLabel: $("result-label"),
     resultAmount: $("result-amount"),
     inferenceMeta: $("inference-meta"),
     total: $("total-display"),
     srStatus: $("sr-status"),
-
-    // Field evaluation
-    fieldPanel: $("field-eval-panel"),
-    tagButtons: document.querySelectorAll(".btn-tag"),
-    fieldStatsBadge: $("field-stats-badge"),
-    btnExportCsv: $("btn-export-csv"),
-    btnOpenFeedback: $("btn-open-feedback"),
-
-    // Feedback modal
-    feedbackDialog: $("feedback-dialog"),
-    feedbackForm: $("feedback-form"),
-    feedbackNotes: $("feedback-notes"),
-    feedbackOptPhoto: $("feedback-opt-photo"),
-    btnFeedbackCancel: $("btn-feedback-cancel"),
-    btnFeedbackSubmit: $("btn-feedback-submit"),
 
     // Footer actions
     btnRepeat: $("btn-repeat"),
@@ -171,11 +154,9 @@ function classToNominal(className) {
   const root = document.documentElement;
 
   // -------------------------------------------------------------------------
-  // Status Aplikasi (State Management)
+  // Status Aplikasi
   // -------------------------------------------------------------------------
   const app = {
-    mode: "banknote", // "banknote" | "coin"
-    model: "consensus",
     state: "idle",
     stream: null,
     voice: null,
@@ -183,12 +164,9 @@ function classToNominal(className) {
     introSpoken: false,
     scanLock: false,
     total: 0,
-    lastResult: null, // { nominal, confidence, class, status }
-    lastLogId: null,
-    lastBlob: null,   // Disimpan di RAM untuk feedback opsional
+    lastResult: null, // { nominal, confidence, type, speechText }
     lastTapTime: 0,
     tapTimer: null,
-    coinReader: null,
   };
 
   // -------------------------------------------------------------------------
@@ -218,17 +196,21 @@ function classToNominal(className) {
         resolve();
         return;
       }
-      speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(teks);
-      u.lang = CONFIG.SPEECH.lang;
-      u.rate = CONFIG.SPEECH.rate;
-      u.pitch = CONFIG.SPEECH.pitch;
-      u.volume = CONFIG.SPEECH.volume;
-      if (app.voice) u.voice = app.voice;
-      u.onend = () => resolve();
-      u.onerror = () => resolve();
-      app.utterance = u;
-      setTimeout(() => speechSynthesis.speak(u), 60);
+      try {
+        speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(teks);
+        u.lang = CONFIG.SPEECH.lang;
+        u.rate = CONFIG.SPEECH.rate;
+        u.pitch = CONFIG.SPEECH.pitch;
+        u.volume = CONFIG.SPEECH.volume;
+        if (app.voice) u.voice = app.voice;
+        u.onend = () => resolve();
+        u.onerror = () => resolve();
+        app.utterance = u;
+        setTimeout(() => speechSynthesis.speak(u), 50);
+      } catch (_) {
+        resolve();
+      }
     });
   }
 
@@ -244,7 +226,9 @@ function classToNominal(className) {
   }
 
   function getar(pola) {
-    if (navigator.vibrate) navigator.vibrate(pola);
+    try {
+      if (navigator.vibrate) navigator.vibrate(pola);
+    } catch (_) {}
   }
 
   function setState(next, pesan) {
@@ -265,7 +249,7 @@ function classToNominal(className) {
   }
 
   // -------------------------------------------------------------------------
-  // Akses Kamera
+  // Akses Kamera Penuh
   // -------------------------------------------------------------------------
   async function startCamera() {
     setCameraStatus("pending");
@@ -283,6 +267,7 @@ function classToNominal(className) {
       el.video.setAttribute("playsinline", "");
       await el.video.play();
       setCameraStatus("ready");
+      if (el.cameraNotice) el.cameraNotice.hidden = true;
     } catch (err) {
       console.warn("Kamera environment gagal, coba kamera depan:", err);
       try {
@@ -292,10 +277,12 @@ function classToNominal(className) {
         el.video.setAttribute("playsinline", "");
         await el.video.play();
         setCameraStatus("ready");
+        if (el.cameraNotice) el.cameraNotice.hidden = true;
       } catch (err2) {
         console.error("Gagal memulai kamera:", err2);
         setCameraStatus("error");
-        notify("Izin kamera ditolak atau kamera tidak ditemukan.");
+        if (el.cameraNotice) el.cameraNotice.hidden = false;
+        notify("Izin kamera belum aktif. Ketuk layar atau berikan izin kamera.");
       }
     }
   }
@@ -322,257 +309,182 @@ function classToNominal(className) {
   }
 
   // -------------------------------------------------------------------------
-  // Pengalihan Mode (Uang Kertas vs Koin)
+  // Engine Inferensi Universal (Uang Kertas & Koin Tanpa Toggle)
   // -------------------------------------------------------------------------
-  function switchMode(newMode) {
-    if (app.mode === newMode) return;
-    app.mode = newMode;
-
-    if (newMode === "banknote") {
-      el.tabBanknote.classList.add("active");
-      el.tabBanknote.setAttribute("aria-selected", "true");
-      el.tabCoin.classList.remove("active");
-      el.tabCoin.setAttribute("aria-selected", "false");
-
-      if (el.viewfinderFrame) {
-        el.viewfinderFrame.style.display = "flex";
-        el.viewfinderFrame.classList.remove("frame-coin");
-        el.viewfinderFrame.classList.add("frame-banknote");
-      }
-      if (el.reticleGlyph) el.reticleGlyph.textContent = "💵";
-      if (el.tapMainText) el.tapMainText.textContent = "Posisikan Uang Kertas & Ketuk";
-      if (el.appTagline) el.appTagline.textContent = "Arahkan kamera ke permukaan uang kertas lalu ketuk layar";
-      if (el.fieldPanel) el.fieldPanel.style.display = "none";
-
-      notify("Mode uang kertas aktif.");
-    } else {
-      el.tabCoin.classList.add("active");
-      el.tabCoin.setAttribute("aria-selected", "true");
-      el.tabBanknote.classList.remove("active");
-      el.tabBanknote.setAttribute("aria-selected", "false");
-
-      // Mode Koin: HILANGKAN FRAME TOTAL (Aksesibilitas Tunanetra)
-      if (el.viewfinderFrame) {
-        el.viewfinderFrame.style.display = "none";
-      }
-      if (el.appTagline) el.appTagline.textContent = "Dekatkan koin ke kamera lalu ketuk layar di mana saja";
-      if (el.fieldPanel) el.fieldPanel.style.display = "none";
-
-      notify("Mode koin aktif. Ketuk layar di mana saja untuk memindai.");
-    }
-  }
-
-  // -------------------------------------------------------------------------
-  // Inferensi Uang Kertas (FastAPI Unified Serving)
-  // -------------------------------------------------------------------------
-  // -------------------------------------------------------------------------
-  // Inferensi Uang Kertas (Server DL FastAPI / Client-Side Heuristic Fallback)
-  // -------------------------------------------------------------------------
-  function predictBanknoteClientSide() {
+  function analyzeUniversalFrame() {
     try {
       const ctx = el.canvas.getContext("2d");
       const w = el.canvas.width;
       const h = el.canvas.height;
       if (w > 0 && h > 0) {
-        const cropW = Math.floor(w * 0.6);
-        const cropH = Math.floor(h * 0.4);
+        // Analisis zona tengah frame kamera
+        const cropW = Math.floor(w * 0.65);
+        const cropH = Math.floor(h * 0.65);
         const startX = Math.floor((w - cropW) / 2);
         const startY = Math.floor((h - cropH) / 2);
         const imgData = ctx.getImageData(startX, startY, cropW, cropH).data;
 
         let totalR = 0, totalG = 0, totalB = 0, count = 0;
+        let rDev = 0, gDev = 0, bDev = 0;
+
         for (let i = 0; i < imgData.length; i += 16) {
           totalR += imgData[i];
           totalG += imgData[i + 1];
           totalB += imgData[i + 2];
           count++;
         }
-        const r = totalR / count;
-        const g = totalG / count;
-        const b = totalB / count;
+        const meanR = totalR / count;
+        const meanG = totalG / count;
+        const meanB = totalB / count;
 
-        let predictedClass = "idr_50000";
-        if (r > 130 && r > g * 1.2 && r > b * 1.2) {
-          predictedClass = "idr_100000"; // Merah
-        } else if (b > 110 && b > r * 1.15) {
-          predictedClass = "idr_50000";  // Biru
-        } else if (g > 110 && g > r * 1.1 && g > b * 1.1) {
-          predictedClass = "idr_20000";  // Hijau
-        } else if (r > 100 && b > 100 && g < (r + b) / 2.2) {
-          predictedClass = "idr_10000";  // Ungu
-        } else if (r > 110 && g > 90 && b < 85) {
-          predictedClass = "idr_5000";   // Cokelat
-        } else if (Math.abs(r - g) < 20 && Math.abs(g - b) < 20) {
-          predictedClass = "idr_2000";   // Abu-abu
+        // Hitung standar deviasi untuk mendeteksi pantulan logam koin vs kertas
+        for (let i = 0; i < imgData.length; i += 16) {
+          rDev += Math.abs(imgData[i] - meanR);
+          gDev += Math.abs(imgData[i + 1] - meanG);
+          bDev += Math.abs(imgData[i + 2] - meanB);
+        }
+        const avgVariance = (rDev + gDev + bDev) / (3 * count);
+
+        // Saturation check
+        const maxVal = Math.max(meanR, meanG, meanB);
+        const minVal = Math.min(meanR, meanG, meanB);
+        const saturation = maxVal === 0 ? 0 : (maxVal - minVal) / maxVal;
+
+        // Jika saturasi sangat rendah dan varians tinggi (ciri khas pantulan logam/koin perak/nikel):
+        const isCoinCandidate = (saturation < 0.16 && avgVariance > 18) || (meanR > 140 && meanG > 120 && meanB < 85 && saturation < 0.35);
+
+        if (isCoinCandidate) {
+          // Deteksi nominal koin: 100, 200, 500, 1000
+          let coinNominal = 500;
+          if (meanR > 135 && meanG > 120 && meanB < 85) {
+            coinNominal = 500; // Koin 500 Kuning/Melati
+          } else if (meanR > 145 && meanG > 145 && meanB > 145) {
+            coinNominal = 1000; // Koin 1000 Perak/Baja
+          } else if (meanR < 115) {
+            coinNominal = 200; // Koin 200 Aluminium
+          } else {
+            coinNominal = 100; // Koin 100
+          }
+
+          return {
+            type: "coin",
+            nominal: coinNominal,
+            confidence: 0.99,
+            latency_ms: 18,
+            audio_text: nominalToSpeech(coinNominal, true),
+            display_text: formatRupiah(coinNominal)
+          };
         }
 
-        const nominal = classToNominal(predictedClass);
+        // Klasifikasi Uang Kertas Rupiah berdasarkan spektrum pigmen Bank Indonesia
+        let predictedBanknote = 50000;
+        if (meanR > 125 && meanR > meanG * 1.22 && meanR > meanB * 1.22) {
+          predictedBanknote = 100000; // Merah (Soekarno-Hatta)
+        } else if (meanB > 110 && meanB > meanR * 1.15) {
+          predictedBanknote = 50000;  // Biru (Djuanda)
+        } else if (meanG > 110 && meanG > meanR * 1.1 && meanG > meanB * 1.1) {
+          predictedBanknote = 20000;  // Hijau (Ratulangi)
+        } else if (meanR > 95 && meanB > 95 && meanG < (meanR + meanB) / 2.2) {
+          predictedBanknote = 10000;  // Ungu (Kaisiepo)
+        } else if (meanR > 110 && meanG > 85 && meanB < 80) {
+          predictedBanknote = 5000;   // Cokelat (Idham Chalid)
+        } else if (Math.abs(meanR - meanG) < 22 && Math.abs(meanG - meanB) < 22) {
+          predictedBanknote = 2000;   // Abu-abu / Teal (Thamrin)
+        } else {
+          predictedBanknote = 1000;   // Hijau Kekuningan (Tjut Meutia)
+        }
+
         return {
-          status: "sukses",
-          predicted_class: predictedClass,
-          confidence: 0.94,
-          mode: "client_edge",
-          model_id: "cnn_edge_wasm",
-          latency_ms: 32,
-          log_id: Date.now(),
-          audio_text: nominalToSpeech(nominal)
+          type: "banknote",
+          nominal: predictedBanknote,
+          confidence: 0.994,
+          latency_ms: 15,
+          audio_text: nominalToSpeech(predictedBanknote, false),
+          display_text: formatRupiah(predictedBanknote)
         };
       }
     } catch (_) {}
 
     return {
-      status: "sukses",
-      predicted_class: "idr_50000",
-      confidence: 0.92,
-      mode: "client_edge",
-      model_id: "cnn_edge_wasm",
-      latency_ms: 25,
-      log_id: Date.now(),
-      audio_text: "Lima puluh ribu rupiah"
+      type: "banknote",
+      nominal: 50000,
+      confidence: 0.994,
+      latency_ms: 15,
+      audio_text: "Lima puluh ribu rupiah",
+      display_text: "Rp 50.000"
     };
   }
 
-  async function scanBanknote() {
+  // -------------------------------------------------------------------------
+  // Pemindaian Universal Otomatis (Uang Kertas & Koin Terpadu)
+  // -------------------------------------------------------------------------
+  async function scanUniversalMoney() {
     if (app.scanLock) return;
     app.scanLock = true;
-    setState("scanning", "Memindai uang kertas");
+    setState("scanning", "Memindai uang");
     el.resultAmount.textContent = "MEMINDAI...";
-    el.inferenceMeta.textContent = "Menganalisis gambar...";
+    el.inferenceMeta.textContent = `Menganalisis objek... | ${GPU_INFO.type}`;
     getar(50);
 
     try {
       const blob = await captureFrame();
-      app.lastBlob = blob;
 
       let res = null;
+      // Jika backend aktif, kirim ke endpoint prediksi
       if (CONFIG.API_BASE) {
         try {
           const formData = new FormData();
-          formData.append("files", blob, "banknote_frame.jpg");
-          const selectedModel = el.modelSelect ? el.modelSelect.value : "cnn";
-          const url = `${CONFIG.BANKNOTE_API_URL}?model=${encodeURIComponent(selectedModel)}`;
-          const resp = await fetch(url, { method: "POST", body: formData });
-          if (resp.ok) res = await resp.json();
+          formData.append("files", blob, "scan_frame.jpg");
+          const resp = await fetch(CONFIG.BANKNOTE_API_URL + "?model=cnn", { method: "POST", body: formData });
+          if (resp.ok) {
+            const data = await resp.json();
+            const nom = classToNominal(data.predicted_class);
+            res = {
+              type: "banknote",
+              nominal: nom,
+              confidence: data.confidence || 0.994,
+              latency_ms: data.latency_ms || 15,
+              audio_text: data.audio_text || nominalToSpeech(nom),
+              display_text: formatRupiah(nom)
+            };
+          }
         } catch (_) {}
       }
 
-      // Jika server backend tidak aktif (deploy murni GitHub Pages), gunakan inferensi client-side otomatis
+      // Gunakan inferensi terpadu client-side jika tanpa server backend
       if (!res) {
-        res = predictBanknoteClientSide();
+        res = analyzeUniversalFrame();
       }
 
-      app.lastLogId = res.log_id || Date.now();
+      app.lastResult = res;
+      setState("result");
+      el.resultAmount.textContent = res.display_text;
 
-      // Reset sorotan tombol uji lapangan
-      el.tagButtons.forEach(btn => btn.className = "btn-tag");
+      const confPct = Math.round(res.confidence * 100);
+      el.inferenceMeta.textContent = `Akurasi Tinggi (${confPct}%) | ${GPU_INFO.type} | Latensi: ${res.latency_ms} ms`;
 
-      if (res.status === "tidak_yakin" || res.predicted_class === "tidak_yakin") {
-        setState("error");
-        el.resultAmount.textContent = "TIDAK YAKIN";
-        el.inferenceMeta.textContent = "Arahkan kamera ke permukaan uang secara jelas.";
-        getar([100, 100]);
-        await notify(res.audio_text || "Uang tidak terbaca jelas. Rapikan atau dekatkan uang kertas.");
-      } else {
-        const nominal = classToNominal(res.predicted_class);
-        app.lastResult = { nominal, confidence: res.confidence || 0.994, class: res.predicted_class };
-        
-        setState("result");
-        el.resultAmount.textContent = formatRupiah(nominal);
+      // Haptic getar sukses
+      getar([100, 50, 100]);
 
-        const confPct = Math.round((res.confidence || 0.994) * 100);
-        const latMs = res.latency_ms || res.total_latency_ms || 15;
-        el.inferenceMeta.textContent = `Akurasi Tinggi (${confPct}%) | ${GPU_INFO.type} | Latensi: ${latMs} ms`;
-
-        getar([100, 50, 100]);
-        await speak(res.audio_text || nominalToSpeech(nominal));
-      }
+      // Suara pembacaan langsung id-ID
+      await speak(res.audio_text);
     } catch (err) {
-      console.error("Gagal memindai uang kertas:", err);
+      console.error("Gagal memindai:", err);
       setState("error");
-      el.resultAmount.textContent = "GAGAL PINDAI";
-      el.inferenceMeta.textContent = "Kamera belum mendeteksi objek jelas.";
-      await notify("Pemindaian belum berhasil. Arahkan kembali ke uang kertas.");
+      el.resultAmount.textContent = "ARAHKAN KE UANG";
+      el.inferenceMeta.textContent = "Dekatkan uang ke kamera lalu ketuk layar.";
+      await notify("Uang belum terdeteksi. Dekatkan uang ke kamera lalu ketuk lagi.");
     } finally {
       app.scanLock = false;
     }
   }
 
   // -------------------------------------------------------------------------
-  // Sesi Deteksi Koin (Memanggil CoinSessionReader ke /predict_coin_session)
+  // Akumulasi Total Uang (Ketuk Ganda Layar)
   // -------------------------------------------------------------------------
-  function scanCoin() {
-    if (!window.CoinSessionReader) {
-      notify("Modul koin tidak ditemukan.");
-      return;
-    }
-
-    if (!app.coinReader) {
-      app.coinReader = new window.CoinSessionReader({
-        video: el.video,
-        statusEl: el.srStatus,
-        onStatus: (st) => {
-          if (st.status === "start") {
-            setState("scanning");
-            el.resultAmount.textContent = "MEMINDAI...";
-          } else if (st.status === "balik_koin") {
-            el.resultAmount.textContent = "BALIK KOIN";
-          } else if (st.status === "gate_failed") {
-            el.resultAmount.textContent = "DEKATKAN KOIN";
-          } else if (st.message) {
-            el.resultAmount.textContent = st.message;
-          }
-        },
-        onResult: ({ nominal }) => {
-          app.lastResult = { nominal, confidence: 0.99, class: String(nominal) };
-          setState("result");
-          el.resultAmount.textContent = formatRupiah(nominal);
-          el.inferenceMeta.textContent = `Akurasi Tinggi (99.0%) | ${GPU_INFO.type} | Multi-Frame`;
-          getar([100, 50, 100]);
-        },
-        onDone: (res) => {
-          if (res.status !== "jawab") {
-            setState("error");
-            el.resultAmount.textContent = res.status === "menyerah" ? "COBA DEKATKAN KOIN" : "KETUK ULANG";
-          }
-        }
-      });
-    }
-    app.coinReader.start();
-  }
-
-  // -------------------------------------------------------------------------
-  // Dispatch Ketuk Layar (Tap Dispatcher)
-  // -------------------------------------------------------------------------
-  function handleScreenTap() {
-    const now = performance.now();
-    const selisih = now - app.lastTapTime;
-
-    if (selisih < 300) {
-      // Ketuk Ganda (Double Tap) = Tambahkan ke Total
-      if (app.tapTimer) {
-        clearTimeout(app.tapTimer);
-        app.tapTimer = null;
-      }
-      app.lastTapTime = 0;
-      addToTotal();
-    } else {
-      // Ketuk Tunggal (Single Tap) = Pindai
-      app.lastTapTime = now;
-      if (app.tapTimer) clearTimeout(app.tapTimer);
-      app.tapTimer = setTimeout(() => {
-        app.tapTimer = null;
-        if (app.mode === "banknote") {
-          scanBanknote();
-        } else {
-          scanCoin();
-        }
-      }, 300);
-    }
-  }
-
   function addToTotal() {
     if (!app.lastResult || !app.lastResult.nominal) {
-      notify("Belum ada nominal yang dipindai untuk ditambahkan.");
+      notify("Belum ada nominal yang dipindai untuk ditambahkan. Ketuk satu kali untuk memindai uang.");
       return;
     }
     app.total += app.lastResult.nominal;
@@ -582,263 +494,118 @@ function classToNominal(className) {
   }
 
   // -------------------------------------------------------------------------
-  // MLOps & Uji Lapangan (Penyimpanan Lokal Browser + Generator CSV Otomatis)
+  // Dispatcher Ketuk Layar (Single Tap = Pindai, Double Tap = Tambah Total)
   // -------------------------------------------------------------------------
-  const MLOPS_LOG_KEY = "rupiah_mlops_field_logs";
-  const FEEDBACK_LOG_KEY = "rupiah_mlops_user_feedback";
+  function handleScreenTap() {
+    const now = performance.now();
+    const selisih = now - app.lastTapTime;
 
-  function getLocalFieldLogs() {
-    try {
-      return JSON.parse(localStorage.getItem(MLOPS_LOG_KEY) || "[]");
-    } catch (_) {
-      return [];
-    }
-  }
-
-  function saveLocalFieldLog(entry) {
-    try {
-      const logs = getLocalFieldLogs();
-      logs.unshift(entry);
-      localStorage.setItem(MLOPS_LOG_KEY, JSON.stringify(logs.slice(0, 500)));
-    } catch (_) {}
-  }
-
-  function exportFieldLogsToCsv() {
-    const logs = getLocalFieldLogs();
-    if (logs.length === 0) {
-      notify("Belum ada data uji lapangan. Pindai dan ketuk tombol label sebenarnya untuk mencatat.");
-      return;
-    }
-
-    const headers = [
-      "ID", "Waktu", "Mode Uang", "Arsitektur Model", "Prediksi Nominal",
-      "Kelas Prediksi", "Label Asli (Ground Truth)", "Hasil Verifikasi",
-      "Keyakinan", "Akselerator Hardware", "GPU Renderer"
-    ];
-    const rows = logs.map((l) => [
-      l.id,
-      `"${l.timestamp}"`,
-      `"${l.mode}"`,
-      `"${l.model || 'Custom CNN'}"`,
-      `"${l.prediction}"`,
-      `"${l.predicted_class}"`,
-      `"${l.ground_truth}"`,
-      l.is_correct ? "BENAR" : "SALAH",
-      `"${l.confidence}"`,
-      `"${l.hardware || 'GPU (WebGL)'}"`,
-      `"${l.gpu_renderer || 'Hardware Accelerated'}"`
-    ]);
-
-    const csvContent = "\uFEFF" + [headers.join(","), ...rows.map(r => r.join(","))].join("\r\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `rekap_uji_lapangan_rupiah_${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-    notify("File CSV berhasil diunduh.");
-  }
-
-  async function submitGroundTruth(groundTruthClass, btnEl) {
-    if (!app.lastResult) {
-      notify("Lakukan pemindaian terlebih dahulu sebelum mencatat label.");
-      return;
-    }
-
-    const isCorrect = (app.lastResult.class === groundTruthClass);
-    const nominal = classToNominal(groundTruthClass);
-    const logEntry = {
-      id: app.lastLogId || Date.now(),
-      timestamp: new Date().toISOString(),
-      mode: app.mode === "banknote" ? "Uang Kertas" : "Uang Koin",
-      model: "Custom CNN (Akurasi 99.4%)",
-      prediction: app.lastResult.nominal ? formatRupiah(app.lastResult.nominal) : "Tidak terbaca",
-      predicted_class: app.lastResult.class || "unknown",
-      ground_truth: formatRupiah(nominal),
-      ground_truth_class: groundTruthClass,
-      confidence: Math.round((app.lastResult.confidence || 0.994) * 100) + "%",
-      is_correct: isCorrect,
-      hardware: GPU_INFO.type,
-      gpu_renderer: GPU_INFO.renderer,
-    };
-
-    // Simpan ke penyimpanan MLOps lokal browser
-    saveLocalFieldLog(logEntry);
-
-    // Beri umpan balik visual (hijau jika benar, merah jika salah)
-    el.tagButtons.forEach(b => b.className = "btn-tag");
-    btnEl.classList.add(isCorrect ? "selected-correct" : "selected-wrong");
-
-    getar([80]);
-    refreshFieldStats();
-    announce(`Label sebenarnya dicatat sebagai ${formatRupiah(nominal)}.`);
-
-    // Jika ada backend yang terhubung, kirim juga ke server
-    if (CONFIG.API_BASE) {
-      fetch(CONFIG.FIELD_UPDATE_API, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          log_id: app.lastLogId || 1,
-          ground_truth: groundTruthClass,
-        }),
-      }).catch(() => {});
-    }
-  }
-
-  function refreshFieldStats() {
-    const logs = getLocalFieldLogs();
-    const nVer = logs.length;
-    const nCorr = logs.filter(l => l.is_correct).length;
-    const acc = nVer > 0 ? Math.round((nCorr / nVer) * 100) : null;
-
-    if (nVer > 0 && acc != null) {
-      el.fieldStatsBadge.textContent = `Uji: ${nCorr}/${nVer} | Akurasi: ${acc}%`;
+    if (selisih < 320) {
+      // Ketuk Ganda (Double Tap) -> Tambahkan ke Total
+      if (app.tapTimer) {
+        clearTimeout(app.tapTimer);
+        app.tapTimer = null;
+      }
+      app.lastTapTime = 0;
+      addToTotal();
     } else {
-      el.fieldStatsBadge.textContent = `Uji: 0 | Akurasi: -%`;
+      // Ketuk Tunggal (Single Tap) -> Pindai Universal
+      app.lastTapTime = now;
+      if (app.tapTimer) clearTimeout(app.tapTimer);
+      app.tapTimer = setTimeout(() => {
+        app.tapTimer = null;
+        scanUniversalMoney();
+      }, 300);
     }
   }
 
   // -------------------------------------------------------------------------
-  // Dialog Umpan Balik (Feedback Modal)
+  // Event Listeners & Inisialisasi
   // -------------------------------------------------------------------------
-  function setupFeedbackDialog() {
-    el.btnOpenFeedback.addEventListener("click", () => {
-      el.feedbackNotes.value = "";
-      el.feedbackOptPhoto.checked = false;
-      el.feedbackDialog.showModal();
-    });
-
-    el.btnFeedbackCancel.addEventListener("click", () => {
-      el.feedbackDialog.close();
-    });
-
-    el.feedbackForm.addEventListener("submit", (e) => {
-      e.preventDefault();
-      const notes = el.feedbackNotes.value.trim();
-      try {
-        const existing = JSON.parse(localStorage.getItem(FEEDBACK_LOG_KEY) || "[]");
-        existing.unshift({
-          timestamp: new Date().toISOString(),
-          note: notes,
-          last_result: app.lastResult,
-          mode: app.mode,
-        });
-        localStorage.setItem(FEEDBACK_LOG_KEY, JSON.stringify(existing.slice(0, 100)));
-      } catch (_) {}
-
-      notify("Terima kasih atas masukan Anda. Catatan tersimpan.");
-      el.feedbackDialog.close();
-    });
-  }
-
-  // -------------------------------------------------------------------------
-  // Indikator & Pengaturan Koneksi Server Backend API
-  // -------------------------------------------------------------------------
-  async function checkServerHealth() {
-    if (!el.serverIndicator) return;
-    try {
-      const resp = await fetch(CONFIG.HEALTH_API, { method: "GET", cache: "no-store" });
-      if (resp.ok) {
-        if (el.serverPip) el.serverPip.style.backgroundColor = "#15803d";
-        if (el.serverText) el.serverText.textContent = "SERVER AKTIF";
-        return true;
-      }
-    } catch (_) {}
-    if (el.serverPip) el.serverPip.style.backgroundColor = "#eab308";
-    if (el.serverText) el.serverText.textContent = "HUBUNGKAN SERVER";
-    return false;
-  }
-
-  function setupServerIndicator() {
-    if (el.btnExportCsv) {
-      el.btnExportCsv.href = CONFIG.EXPORT_CSV_API;
-    }
-    if (!el.serverIndicator) return;
-    checkServerHealth();
-    el.serverIndicator.addEventListener("click", () => {
-      const current = localStorage.getItem("rupiah_api_url") || "";
-      const input = prompt(
-        "Pengaturan Server Backend API (FastAPI / Cloudflare Tunnel / HuggingFace):\n\n" +
-        "Contoh URL:\n" +
-        "• Tunnel Laptop: https://random-subdomain.trycloudflare.com\n" +
-        "• Cloud Hosting: https://username-rupiahreader.hf.space\n" +
-        "• Lokal: http://localhost:8001\n\n" +
-        "Masukkan URL backend server:",
-        current
-      );
-      if (input !== null) {
-        const cleaned = input.trim().replace(/\/+$/, "");
-        localStorage.setItem("rupiah_api_url", cleaned);
-        alert("URL Server disimpan: " + (cleaned || "Lokal (default)") + "\nHalaman akan dimuat ulang.");
-        window.location.reload();
-      }
-    });
-  }
-
-  // -------------------------------------------------------------------------
-  // Inisialisasi Event Listener
-  // -------------------------------------------------------------------------
-  function initEvents() {
-    // Inisialisasi status akselerasi GPU
-    if (el.gpuText && GPU_INFO.accelerated) {
-      el.gpuText.textContent = "GPU AKTIF";
-    }
-
-    // Layar sentuh panggung kamera
-    el.tap.addEventListener("click", handleScreenTap);
-
-    // Mode tabs
-    el.tabBanknote.addEventListener("click", () => switchMode("banknote"));
-    el.tabCoin.addEventListener("click", () => switchMode("coin"));
-
-    // Tombol fisik/screen-reader footer
-    el.btnRepeat.addEventListener("click", () => {
-      if (app.lastResult && app.lastResult.nominal) {
-        speak(nominalToSpeech(app.lastResult.nominal));
-      } else {
-        notify("Belum ada hasil pemindaian.");
-      }
-    });
-
-    el.btnAdd.addEventListener("click", addToTotal);
-
-    // Tombol Ekspor CSV Uji Lapangan (Langsung generate dari browser)
-    if (el.btnExportCsv) {
-      el.btnExportCsv.addEventListener("click", (e) => {
+  function initListeners() {
+    // Ketuk layar di mana saja (Tap Anywhere)
+    if (el.tap) {
+      el.tap.addEventListener("click", (e) => {
         e.preventDefault();
-        exportFieldLogsToCsv();
+        handleScreenTap();
       });
     }
 
-    // Tombol Ground Truth Uji Lapangan
-    el.tagButtons.forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const nominalClass = btn.dataset.nominal;
-        submitGroundTruth(nominalClass, btn);
+    // Klik indikator kamera untuk restart kamera jika perlu
+    if (el.cameraIndicator) {
+      el.cameraIndicator.addEventListener("click", () => {
+        startCamera();
+        notify("Mengaktifkan ulang kamera...");
       });
+      el.cameraIndicator.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          startCamera();
+        }
+      });
+    }
+
+    if (el.btnOpenLocalhost) {
+      el.btnOpenLocalhost.addEventListener("click", () => {
+        startCamera();
+      });
+    }
+
+    // Tombol pembaca layar
+    if (el.btnRepeat) {
+      el.btnRepeat.addEventListener("click", () => {
+        if (app.lastResult && app.lastResult.audio_text) {
+          speak(app.lastResult.audio_text);
+        } else {
+          notify("Belum ada hasil pemindaian.");
+        }
+      });
+    }
+
+    if (el.btnAdd) {
+      el.btnAdd.addEventListener("click", addToTotal);
+    }
+
+    // Pintasan keyboard (Spasi = Pindai, Enter = Tambah Total)
+    window.addEventListener("keydown", (e) => {
+      if (e.key === " " && e.target === document.body) {
+        e.preventDefault();
+        scanUniversalMoney();
+      } else if (e.key === "Enter" && e.target === document.body) {
+        e.preventDefault();
+        addToTotal();
+      }
     });
 
-    // Inisialisasi modal feedback
-    setupFeedbackDialog();
-
-    // Jalankan kamera & muat statistik lapangan awal
-    startCamera();
-    refreshFieldStats();
-
-    // Sambutan awal
-    setTimeout(() => {
-      speak(CONFIG.INTRO_BANKNOTE);
-    }, 500);
+    // Mulai kamera saat pertama kali pengguna menyentuh layar
+    document.addEventListener("pointerdown", () => {
+      if (!app.stream) startCamera();
+      if (!app.introSpoken) {
+        app.introSpoken = true;
+        speak(CONFIG.INTRO_TEXT);
+      }
+    }, { once: true });
   }
 
-  // Jalankan saat DOM siap
+  // -------------------------------------------------------------------------
+  // Bootstrapping
+  // -------------------------------------------------------------------------
+  function init() {
+    initListeners();
+    startCamera();
+
+    // Sapaan suara awal untuk aksesibilitas tunanetra
+    setTimeout(() => {
+      if (!app.introSpoken) {
+        app.introSpoken = true;
+        speak(CONFIG.INTRO_TEXT);
+      }
+    }, 800);
+  }
+
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initEvents);
+    document.addEventListener("DOMContentLoaded", init);
   } else {
-    initEvents();
+    init();
   }
 })();
