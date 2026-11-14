@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@700;900&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=3.0">
+  <link rel="stylesheet" href="style.css?v=4.0">
 </head>
 <body class="camera-fullscreen-theme">
   <a class="skip-link" href="#tap-area">Lewati ke area pemindai</a>
@@ -82,13 +82,10 @@
           <div id="inference-meta" class="inference-meta" aria-hidden="true"></div>
         </section>
 
-        <!-- Ringkasan Akumulasi Total & Tombol CSV -->
+        <!-- Ringkasan Akumulasi Total -->
         <div class="total-wrapper">
-          <div class="total-info">
-            <p id="total-display" class="total-value">Total: Rp 0</p>
-            <p class="total-gesture-hint" aria-hidden="true">Ketuk 2x Layar = Tambah Total</p>
-          </div>
-          <button id="btn-export-csv" class="btn-export-subtle" type="button" aria-label="Unduh Rekap CSV">📥 Unduh CSV</button>
+          <p id="total-display" class="total-value">Total: Rp 0</p>
+          <p class="total-gesture-hint" aria-hidden="true">Ketuk 2x Layar = Tambah Total</p>
         </div>
       </div>
 
@@ -135,7 +132,7 @@
   </dialog>
 
   <!-- Script Backend & Interaktivitas -->
-  <script src="coin-reader.js?v=3.0"></script>
-  <script src="script.js?v=3.0"></script>
+  <script src="coin-reader.js?v=4.0"></script>
+  <script src="script.js?v=4.0"></script>
 </body>
 </html>
