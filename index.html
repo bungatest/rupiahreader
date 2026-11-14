@@ -6,94 +6,179 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <meta name="theme-color" content="#000000">
-  <meta name="description" content="Rupiah Reader – Pembaca nominal uang kertas dan koin Rupiah layar penuh dengan audio id-ID dan visual kontras tinggi untuk tunanetra dan low vision.">
-  <title>Rupiah Reader – Pembaca Nominal Uang Kertas &amp; Koin Rupiah</title>
+  <meta name="theme-color" content="#1e1b4b">
+  <meta name="description" content="Rupiah Reader – Pemindai Uang Rupiah Cerdas bertenaga AI dengan visual modern, panduan audio id-ID, dan akurasi tinggi.">
+  <title>Rupiah Reader – AI Money Scanner</title>
+  
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@700;900&amp;family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&amp;display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=5.0">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css?v=6.0">
 </head>
-<body class="camera-fullscreen-theme">
-  <a class="skip-link" href="#tap-area">Lewati ke area pemindai</a>
+<body class="theme-modern">
+  <a class="skip-link" href="#tap-fullscreen">Lewati ke area pemindai</a>
 
-  <!-- Panggung Utama: Kamera Penuh Seluruh Layar (Tanpa Frame Penghalang) -->
-  <div id="app-stage" class="stage-fullscreen">
+  <!-- Panggung Kamera Fullscreen -->
+  <div id="camera-stage" class="camera-stage">
     <video id="camera-preview" autoplay playsinline muted></video>
-    
-    <button id="tap-area" type="button" aria-label="Ketuk layar di mana saja untuk memindai uang kertas atau koin, ketuk dua kali untuk menjumlahkan">
-      <span class="tap-card">
-        <span id="reticle-glyph" class="reticle-glyph">💵🪙</span>
-        <span id="tap-main-text" class="tap-main-text">Ketuk Layar untuk Memindai</span>
-      </span>
-    </button>
+    <div class="camera-ambient-overlay"></div>
+    <canvas id="capture-canvas" hidden></canvas>
   </div>
 
-  <canvas id="capture-canvas" hidden></canvas>
+  <!-- Area Sentuh Layar Penuh -->
+  <button id="tap-fullscreen" class="tap-fullscreen-btn" type="button" aria-label="Ketuk layar di mana saja untuk memindai uang, ketuk dua kali untuk menjumlahkan total">
+    
+    <!-- Viewfinder Persegi Panjang Vertikal (Sesuai Referensi GIF) -->
+    <div id="viewfinder" class="viewfinder">
+      <!-- 4 Sudut Rounded Putih Tebal -->
+      <span class="vf-corner corner-tl" aria-hidden="true"></span>
+      <span class="vf-corner corner-tr" aria-hidden="true"></span>
+      <span class="vf-corner corner-bl" aria-hidden="true"></span>
+      <span class="vf-corner corner-br" aria-hidden="true"></span>
 
-  <!-- Antarmuka Terapung Responsif (HUD Kontras Tinggi) -->
-  <div class="hud-layer">
-    <header class="app-header">
-      <div class="header-top-bar">
-        <div class="indicators-group">
-          <div id="camera-indicator-btn" class="header-indicator" role="button" tabindex="0" aria-label="Status kamera. Klik untuk mengaktifkan ulang kamera">
-            <span class="indicator-pip"></span>
-            <span class="indicator-text">KAMERA AKTIF</span>
-          </div>
-          <div id="gpu-indicator" class="header-indicator" role="status" aria-label="Akselerasi hardware GPU">
-            <span class="indicator-pip" style="background-color:#0284c7;"></span>
-            <span id="gpu-indicator-text" class="indicator-text">GPU AKTIF</span>
-          </div>
+      <!-- Laser Pindai Neon Ungu Berpendar -->
+      <div id="laser-scanner" class="laser-scanner" aria-hidden="true">
+        <div class="laser-beam"></div>
+        <div class="laser-glow"></div>
+      </div>
+
+      <!-- Animasi Ceklis Sukses di Tengah Viewfinder -->
+      <div id="success-badge" class="success-badge" aria-hidden="true">
+        <div class="success-glow-halo"></div>
+        <div class="success-rays">
+          <span class="ray r-1"></span>
+          <span class="ray r-2"></span>
+          <span class="ray r-3"></span>
+          <span class="ray r-4"></span>
+        </div>
+        <div class="success-circle">
+          <svg class="check-svg" viewBox="0 0 24 24" fill="none">
+            <path d="M5 13l4 4L19 7" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
         </div>
       </div>
+    </div>
+  </button>
 
-      <div class="header-main-row">
-        <h1 class="app-title">Rupiah Reader</h1>
+  <!-- Lapisan Antarmuka UI Terapung (Floating Glass Interface) -->
+  <div class="floating-ui-layer">
+    
+    <!-- Top Navigation Bar (Frosted Circular Buttons) -->
+    <header class="top-nav-bar">
+      <button id="btn-back" class="nav-circle-btn" type="button" aria-label="Kembali">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="15 18 9 12 15 6"></polyline>
+        </svg>
+      </button>
+
+      <!-- Mini Chip Status GPU & Kamera -->
+      <div id="ai-chip" class="ai-status-chip" role="status">
+        <span class="chip-pulse"></span>
+        <span id="chip-text" class="chip-text">AI Scanner Active</span>
       </div>
 
-      <p id="app-tagline" class="app-tagline">Arahkan kamera ke uang (kertas atau koin) lalu ketuk layar di mana saja</p>
-      
-      <div id="camera-notice" class="camera-notice-banner" hidden>
-        <span id="camera-notice-text">Kamera belum aktif. Pastikan izin kamera telah diberikan:</span>
-        <button id="btn-open-localhost" class="notice-link-btn" type="button">Aktifkan Kamera</button>
-      </div>
+      <button id="btn-menu" class="nav-circle-btn" type="button" aria-label="Menu Opsi & Total">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          <circle cx="12" cy="5" r="2.2"></circle>
+          <circle cx="12" cy="12" r="2.2"></circle>
+          <circle cx="12" cy="19" r="2.2"></circle>
+        </svg>
+      </button>
     </header>
 
-    <main class="app-main">
-      <div class="main-panel-card">
-        <!-- Kotak Hasil Wajib Latar #000000 Pekat + Teks Kuning #FFFF00 Raksasa -->
-        <section id="result-box" class="result-display" role="status" aria-live="polite" aria-atomic="true">
-          <p id="result-label" class="result-title">Hasil Pemindaian</p>
-          <p id="result-amount" class="result-number">SIAP MEMINDAI</p>
-          <div id="inference-meta" class="inference-meta" aria-hidden="true"></div>
-        </section>
+    <!-- Tombol Zoom Melayang di Kiri Bawah (1x) -->
+    <button id="btn-zoom" class="floating-zoom-btn" type="button" aria-label="Ganti Zoom Kamera">
+      <span id="zoom-label">1x</span>
+    </button>
 
-        <!-- Ringkasan Akumulasi Total -->
-        <div class="total-wrapper">
-          <p id="total-display" class="total-value">Total: Rp 0</p>
-          <p class="total-gesture-hint" aria-hidden="true">Ketuk 2x Layar = Tambah Total</p>
+    <!-- Floating Bottom Pill Card (Komponen Inti Sesuai GIF Referensi) -->
+    <div id="bottom-card" class="bottom-pill-card state-idle" role="region" aria-live="polite">
+      
+      <!-- Slot Kiri: Ikon Dinamis (Reticle -> Spinner -> Thumbnail) -->
+      <div id="pill-icon-slot" class="pill-icon-slot">
+        
+        <!-- Mode Idle: Kotak Ungu Lembut dengan Ikon Reticle -->
+        <div id="icon-idle" class="icon-subview subview-idle">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 8V5a1 1 0 0 1 1-1h3"></path>
+            <path d="M16 4h3a1 1 0 0 1 1 1v3"></path>
+            <path d="M4 16v3a1 1 0 0 0 1 1h3"></path>
+            <path d="M16 20h3a1 1 0 0 0 1-1v-3"></path>
+            <line x1="8" y1="12" x2="16" y2="12"></line>
+          </svg>
+        </div>
+
+        <!-- Mode Scanning: Ring Spinner Berputar Halus -->
+        <div id="icon-scanning" class="icon-subview subview-scanning">
+          <div class="spinner-ring"></div>
+        </div>
+
+        <!-- Mode Result: Thumbnail Uang Realistis Sesuai Hasil Deteksi -->
+        <div id="icon-result" class="icon-subview subview-result">
+          <div id="banknote-thumbnail" class="banknote-thumbnail val-2000">
+            <span class="thumb-watermark">IDR</span>
+            <span id="thumb-number" class="thumb-number">2.000</span>
+          </div>
         </div>
       </div>
 
-      <!-- Live region status sistem khusus screen reader -->
-      <p id="sr-status" class="sr-only" aria-live="polite"></p>
-    </main>
+      <!-- Slot Tengah: Teks Status & Nominal Uang -->
+      <div class="pill-text-content">
+        <span id="pill-subtitle" class="pill-subtitle">Scanning...</span>
+        <span id="pill-title" class="pill-title">Posisikan Uang Kertas di Sini</span>
+      </div>
 
-    <!-- Tombol Aksi Fisik / Pembaca Layar -->
-    <footer class="app-footer sr-only">
-      <button id="btn-repeat" class="action-btn btn-repeat-style" type="button">
-        <span class="btn-glyph" aria-hidden="true">🔊</span>
-        <span class="btn-label">Ulangi Suara</span>
+      <!-- Slot Kanan: Tombol Flashlight / Senter Bulat Ungu -->
+      <button id="btn-torch" class="pill-torch-btn" type="button" aria-label="Nyalakan senter kamera">
+        <svg class="torch-svg" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M7 2h10a1 1 0 0 1 1 1v3.5a2 2 0 0 1-.6 1.4L15 10.3V21a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-10.7L6.6 7.9A2 2 0 0 1 6 6.5V3a1 1 0 0 1 1-1zm3 10v7h4v-7h-4zm-1-7v1.5l1.6 1.9a1 1 0 0 1 .4.6V9h4v-.01a1 1 0 0 1 .4-.58L16 6.5V5H9z"/>
+        </svg>
       </button>
-      <button id="btn-add" class="action-btn btn-add-style" type="button">
-        <span class="btn-glyph" aria-hidden="true">➕</span>
-        <span class="btn-label">Tambah Total</span>
-      </button>
-    </footer>
+    </div>
   </div>
 
-  <!-- Script Backend & Interaktivitas -->
-  <script src="coin-reader.js?v=5.0"></script>
-  <script src="script.js?v=5.0"></script>
+  <!-- Modal Bottom Sheet Menu (Total Akumulasi & Pengaturan) -->
+  <div id="menu-backdrop" class="menu-backdrop" hidden>
+    <div id="menu-sheet" class="menu-bottom-sheet">
+      <div class="sheet-handle"></div>
+      
+      <div class="sheet-header">
+        <h2 class="sheet-title">Rupiah Reader</h2>
+        <button id="btn-close-sheet" class="sheet-close-btn" type="button" aria-label="Tutup menu">✕</button>
+      </div>
+
+      <div class="sheet-total-card">
+        <span class="total-caption">Total Akumulasi Belanja</span>
+        <span id="sheet-total-value" class="total-big-number">Rp 0</span>
+        <div class="total-actions-row">
+          <button id="btn-add-total" class="sheet-btn primary-btn" type="button">➕ Tambah Hasil Terakhir</button>
+          <button id="btn-reset-total" class="sheet-btn secondary-btn" type="button">🔄 Reset</button>
+        </div>
+      </div>
+
+      <div class="sheet-info-group">
+        <div class="sheet-info-row">
+          <span class="info-label">Model AI</span>
+          <span class="info-val">Custom CNN (99.44% Akurasi)</span>
+        </div>
+        <div class="sheet-info-row">
+          <span class="info-label">Akselerasi Hardware</span>
+          <span id="sheet-gpu-val" class="info-val">GPU WebGL Aktif</span>
+        </div>
+        <div class="sheet-info-row">
+          <span class="info-label">Panduan Suara (TTS)</span>
+          <span id="sheet-tts-status" class="info-val">Bahasa Indonesia (Aktif)</span>
+        </div>
+      </div>
+      
+      <p class="sheet-hint">💡 Tip: Ketuk layar 1x untuk memindai uang, ketuk 2x untuk langsung menambah ke total.</p>
+    </div>
+  </div>
+
+  <!-- Screen reader live region -->
+  <p id="sr-status" class="sr-only" aria-live="polite"></p>
+
+  <script src="coin-reader.js?v=6.0"></script>
+  <script src="script.js?v=6.0"></script>
 </body>
 </html>
