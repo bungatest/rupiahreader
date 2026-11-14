@@ -1,0 +1,42 @@
+# Batch & Executables
+*.bat
+*.cmd
+*.exe
+cloudflared
+
+# Backend & Python code
+serving/
+*.py
+requirements.txt
+requirements.lock.txt
+__pycache__/
+*.pyc
+
+# Deep Learning Models & Notebooks
+model/
+model_coins/
+*.ipynb
+*.keras
+*.h5
+*.tflite
+*.json
+!manifest.json
+
+# Datasets & Documents
+dataset*/
+rupiah-banknotes-dataset-main/
+*.zip
+*.tar.gz
+*.mp4
+*.mov
+*.docx
+*.pdf
+*.skill
+rupiah-reader-frontend/
+
+# IDE & OS
+.vincent/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
