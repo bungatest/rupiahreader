@@ -32,10 +32,10 @@
 
   // Ambang Batas Keyakinan Terkalibrasi (Sesuai Standar Aksesibilitas Tunanetra & Kondisi Kamera Riil)
   const THRESHOLDS = {
-    CONFIRMED: 0.70,             // Minimal 70% rata-rata confidence untuk konfirmasi
-    MARGIN: 0.25,                // Minimal 25% margin di atas peringkat kedua
-    UNCERTAIN: 0.45,             // Ambang batas keraguan (ambigu)
-    UNKNOWN: 0.40,               // Di bawah 40% dianggap objek tak dikenal / frame kosong
+    CONFIRMED: 0.65,             // Minimal 65% rata-rata confidence untuk konfirmasi
+    MARGIN: 0.20,                // Minimal 20% margin di atas peringkat kedua
+    UNCERTAIN: 0.40,             // Ambang batas keraguan (ambigu)
+    UNKNOWN: 0.35,               // Di bawah 35% dianggap objek tak dikenal / frame kosong
     WINDOW_SIZE: 6,              // Buffer sliding window 6 frame terakhir
     MIN_VOTES: 4,                // Minimal 4 dari 6 frame sepakat pada nominal yang sama
     TARGET_FRAME_INTERVAL_MS: 160, // Target ~6 FPS untuk scanning kontinu tanpa membebani GPU/CPU
@@ -335,9 +335,56 @@
   }
 
   // -------------------------------------------------------------------------
+  // Perhitungan Koordinat Crop Presisi dari Kotak Viewfinder UI
+  // -------------------------------------------------------------------------
+  function getViewfinderCropCoords(videoEl, viewfinderEl) {
+    const vw = videoEl.videoWidth;
+    const vh = videoEl.videoHeight;
+    if (!vw || !vh) {
+      return { sx: 0, sy: 0, sw: 224, sh: 224 };
+    }
+
+    const vRect = videoEl.getBoundingClientRect ? videoEl.getBoundingClientRect() : { width: vw, height: vh, left: 0, top: 0 };
+    const vf = viewfinderEl || el.viewfinder;
+    const vfRect = (vf && vf.getBoundingClientRect) ? vf.getBoundingClientRect() : {
+      left: vRect.left + vRect.width * 0.15,
+      top: vRect.top + vRect.height * 0.20,
+      width: vRect.width * 0.70,
+      height: vRect.height * 0.55,
+      right: vRect.left + vRect.width * 0.85
+    };
+
+    const scale = Math.max(vRect.width / vw, vRect.height / vh);
+    const renderedW = vw * scale;
+    const renderedH = vh * scale;
+    const renderedLeft = vRect.left + (vRect.width - renderedW) / 2;
+    const renderedTop = vRect.top + (vRect.height - renderedH) / 2;
+
+    const isMirrored = document.body.classList.contains("cam-user") ||
+      (app && app.currentFacingMode === "user");
+
+    const screenLeft = isMirrored
+      ? renderedW - (vfRect.right - renderedLeft)
+      : (vfRect.left - renderedLeft);
+    const screenTop = vfRect.top - renderedTop;
+
+    const sxRaw = screenLeft / scale;
+    const syRaw = screenTop / scale;
+    const swRaw = vfRect.width / scale;
+    const shRaw = vfRect.height / scale;
+
+    const sx = Math.max(0, Math.min(vw - 1, Math.round(sxRaw)));
+    const sy = Math.max(0, Math.min(vh - 1, Math.round(syRaw)));
+    const sw = Math.max(1, Math.min(vw - sx, Math.round(swRaw)));
+    const sh = Math.max(1, Math.min(vh - sy, Math.round(shRaw)));
+
+    return { sx, sy, sw, sh };
+  }
+
+  // -------------------------------------------------------------------------
   // Lokalisasi Uang Kertas Otomatis (Lightweight Client-Side Saliency)
   // -------------------------------------------------------------------------
-  // Menganalisis frame video penuh secara independen dari kotak viewfinder
+  // Menganalisis area foreground secara cerdas tanpa terjebak warna baju di bawah
   let analysisCanvas = null;
   let analysisCtx = null;
 
@@ -373,18 +420,21 @@
     const imgData = analysisCtx.getImageData(0, 0, analysisW, analysisH);
     const pixels = imgData.data;
 
-    // 1. Image Quality Metrics & Blok Energi Saliency
+    // Batasi pencarian aktif pada area atas/tengah (maks 76% tinggi frame)
+    // agar baju/kerah/kancing di bagian dada bawah tidak mendominasi bounding box
+    const searchH = Math.round(analysisH * 0.76);
+
     let totalLuma = 0;
     let totalGradient = 0;
     let sampleCount = 0;
 
     const blockSize = 16;
     const gridCols = Math.floor(analysisW / blockSize);
-    const gridRows = Math.floor(analysisH / blockSize);
+    const gridRows = Math.floor(searchH / blockSize);
     const gridEnergy = new Float32Array(gridCols * gridRows);
 
-    const step = 2; // Step 2 piksel untuk kecepatan (< 5ms di CPU HP)
-    for (let y = 1; y < analysisH - 1; y += step) {
+    const step = 2; // Step 2 piksel untuk kecepatan (< 4ms di CPU)
+    for (let y = 1; y < searchH - 1; y += step) {
       const rowOffset = y * analysisW;
       const gridY = Math.min(gridRows - 1, Math.floor(y / blockSize));
 
@@ -413,16 +463,16 @@
         const grad = Math.abs(lumaR - lumaL) + Math.abs(lumaD - lumaU);
         totalGradient += grad;
 
-        // Heuristik Deteksi Warna Kulit Manusia (Tangan / Jari / Wajah)
-        // Reduksi bobot pada jari pemegang uang agar tidak mendominasi bounding box
+        // Deteksi Warna Kulit Manusia (Tangan / Jari / Wajah)
         const isSkin = (r > 75 && g > 40 && b > 20 && r > g && (r - b) > 15 && (Math.max(r, g, b) - Math.min(r, g, b) > 15));
         const colorSpread = Math.max(r, g, b) - Math.min(r, g, b);
 
         let saliency = grad;
         if (isSkin) {
-          saliency *= 0.15; // Redam area jari/tangan
+          saliency *= 0.12; // Redam area jari/tangan
         } else {
-          saliency += colorSpread * 0.40; // Beri bobot tinggi pada ukiran & motif uang kertas
+          // Bobot tinggi pada tekstur guilloche & angka nominal uang kertas
+          saliency += colorSpread * 0.35;
         }
 
         const gridX = Math.min(gridCols - 1, Math.floor(x / blockSize));
@@ -438,15 +488,15 @@
       qualityStatus = "DARK";
     } else if (avgBrightness > 225) {
       qualityStatus = "OVEREXPOSED";
-    } else if (avgBlurEnergy < 3.8) {
+    } else if (avgBlurEnergy < 3.5) {
       qualityStatus = "BLURRY";
     }
 
     // 2. Evaluasi Bounding Box Kandidat Uang
     let totalGrid = 0;
     for (let i = 0; i < gridEnergy.length; i++) totalGrid += gridEnergy[i];
-    const meanGrid = totalGrid / gridEnergy.length;
-    const energyThresh = meanGrid * 1.25;
+    const meanGrid = totalGrid / Math.max(1, gridEnergy.length);
+    const energyThresh = meanGrid * 1.30;
 
     let minCol = gridCols, maxCol = -1, minRow = gridRows, maxRow = -1;
     let activeBlockCount = 0;
@@ -463,40 +513,31 @@
       }
     }
 
+    // Jika blok aktif terlalu sedikit atau mencakup seluruh layar, gunakan default foreground tengah
+    let candX, candY, candW, candH;
     const totalBlocks = gridCols * gridRows;
-    const coverageRatio = activeBlockCount / totalBlocks;
+    const coverageRatio = activeBlockCount / Math.max(1, totalBlocks);
 
-    // Jika blok aktif terlalu sedikit, gunakan fallback frame tengah (75%)
-    if (activeBlockCount < 4 || minCol > maxCol || minRow > maxRow) {
-      return {
-        status: "NO_OBJECT",
-        qualityStatus,
-        avgBrightness,
-        avgBlurEnergy,
-        coverageRatio,
-        aspectRatio: 1.0,
-        candPixelBox: { x: 0, y: 0, w: analysisW, h: analysisH },
-        sx: Math.round(vw * 0.12),
-        sy: Math.round(vh * 0.12),
-        sw: Math.round(vw * 0.76),
-        sh: Math.round(vh * 0.76),
-        confidence: 0.1
-      };
+    if (activeBlockCount < 4 || minCol > maxCol || minRow > maxRow || coverageRatio > 0.72) {
+      // Default: 70% lebar tengah, 55% tinggi atas (posisi alami memegang uang di depan kamera)
+      candX = Math.round(analysisW * 0.15);
+      candY = Math.round(analysisH * 0.12);
+      candW = Math.round(analysisW * 0.70);
+      candH = Math.round(analysisH * 0.55);
+    } else {
+      candX = minCol * blockSize;
+      candY = minRow * blockSize;
+      candW = (maxCol - minCol + 1) * blockSize;
+      candH = (maxRow - minRow + 1) * blockSize;
+
+      // Beri safety margin 10%
+      const padX = Math.round(candW * 0.10);
+      const padY = Math.round(candH * 0.10);
+      candX = Math.max(0, candX - padX);
+      candY = Math.max(0, candY - padY);
+      candW = Math.min(analysisW - candX, candW + padX * 2);
+      candH = Math.min(analysisH - candY, candH + padY * 2);
     }
-
-    // Konversi koordinat grid ke piksel kanvas analisis
-    let candX = minCol * blockSize;
-    let candY = minRow * blockSize;
-    let candW = (maxCol - minCol + 1) * blockSize;
-    let candH = (maxRow - minRow + 1) * blockSize;
-
-    // Beri safety margin 12% di keempat sisi agar sudut, angka nominal, & teks tidak terpotong
-    const padX = Math.round(candW * 0.12);
-    const padY = Math.round(candH * 0.12);
-    candX = Math.max(0, candX - padX);
-    candY = Math.max(0, candY - padY);
-    candW = Math.min(analysisW - candX, candW + padX * 2);
-    candH = Math.min(analysisH - candY, candH + padY * 2);
 
     const candAreaRatio = (candW * candH) / (analysisW * analysisH);
     const candAspectRatio = candW / Math.max(1, candH);
@@ -504,11 +545,8 @@
     let candidateStatus = "OK";
     if (candAreaRatio < 0.05) {
       candidateStatus = "TOO_FAR";
-    } else if (candAreaRatio > 0.88 || candW >= analysisW * 0.96 || candH >= analysisH * 0.96) {
-      candidateStatus = "TOO_CLOSE";
     }
 
-    // Petakan koordinat kanvas analisis ke koordinat video resolusi asli
     const scaleX = vw / analysisW;
     const scaleY = vh / analysisH;
 
@@ -526,19 +564,18 @@
       aspectRatio: candAspectRatio,
       candPixelBox: { x: candX, y: candY, w: candW, h: candH },
       sx, sy, sw, sh,
-      confidence: Math.min(1.0, activeBlockCount / 14)
+      confidence: Math.min(1.0, activeBlockCount / 12)
     };
   }
 
   // -------------------------------------------------------------------------
   // Preprocessing Citra: Mode 'pad' (ImageOps.contain 224x224 RGB [0, 255])
   // -------------------------------------------------------------------------
-  // Mengembalikan Tensor float32 [1, 224, 224, 3] dalam rentang [0, 255] RGB
-  // serta kanvas 224x224 untuk preview visual di mode debug (?debug=1)
+  // Mendukung horizontal flip (un-mirroring) otomatis untuk kamera depan / webcam
   let preprocessCanvas = null;
   let preprocessCtx = null;
 
-  function extractTensorAndCanvas(videoEl, sx, sy, sw, sh) {
+  function extractTensorAndCanvas(videoEl, sx, sy, sw, sh, flipHorizontal = false) {
     if (!preprocessCanvas) {
       preprocessCanvas = document.createElement("canvas");
       preprocessCanvas.width = 224;
@@ -547,6 +584,7 @@
     }
 
     // 1. Isi kanvas dengan padding hitam rgb(0,0,0) (persis ImageOps.contain di notebook)
+    preprocessCtx.save();
     preprocessCtx.fillStyle = "#000000";
     preprocessCtx.fillRect(0, 0, 224, 224);
 
@@ -559,7 +597,16 @@
 
     preprocessCtx.imageSmoothingEnabled = true;
     preprocessCtx.imageSmoothingQuality = "high";
-    preprocessCtx.drawImage(videoEl, sx, sy, sw, sh, destX, destY, destW, destH);
+
+    if (flipHorizontal) {
+      // Un-mirror front-facing selfie camera agar tulisan nominal & potret pahlawan tidak terbalik
+      preprocessCtx.translate(224, 0);
+      preprocessCtx.scale(-1, 1);
+      preprocessCtx.drawImage(videoEl, sx, sy, sw, sh, 224 - (destX + destW), destY, destW, destH);
+    } else {
+      preprocessCtx.drawImage(videoEl, sx, sy, sw, sh, destX, destY, destW, destH);
+    }
+    preprocessCtx.restore();
 
     // 3. Konversi ke Tensor float32 [1, 224, 224, 3] dalam rentang [0, 255] RGB
     // CATATAN: TIDAK DIBAGI 255.0 (Model sudah memiliki layer internal Rescaling(1./255))
@@ -573,7 +620,7 @@
   }
 
   // -------------------------------------------------------------------------
-  // Inferensi Multi-Crop Terkalibrasi (Candidate Crop + Full Frame Fallback)
+  // Inferensi Multi-Crop Terkalibrasi (Candidate Crop + Viewfinder Target Crop)
   // -------------------------------------------------------------------------
   async function predictBanknoteFrame(videoEl) {
     const vw = videoEl.videoWidth;
@@ -581,13 +628,14 @@
     if (!vw || !vh || !app.tfModel) return null;
 
     const t0 = performance.now();
+    const isFrontCam = document.body.classList.contains("cam-user") || (app.currentFacingMode === "user");
 
-    // 1. Lokalisasi wilayah uang kertas di seluruh frame kamera
+    // 1. Lokalisasi wilayah uang kertas di area foreground
     const loc = locateBanknoteCandidate(videoEl);
 
-    // 2. Ekstrak tensor kandidat hasil lokalisasi
+    // 2. Ekstrak tensor kandidat hasil lokalisasi dengan koreksi mirroring
     const { tensor: tensorCand, canvas: canvasCand } = extractTensorAndCanvas(
-      videoEl, loc.sx, loc.sy, loc.sw, loc.sh
+      videoEl, loc.sx, loc.sy, loc.sw, loc.sh, isFrontCam
     );
 
     let probsCand;
@@ -616,39 +664,40 @@
       canvas: canvasCand
     };
 
-    // 3. Fallback Multi-Crop jika kandidat ragu atau status bukan OK
-    // Memastikan jika uang tidak terlokalisasi sempurna, model tetap memeriksa frame penuh
-    if (topCand.prob < 0.65 || loc.status !== "OK") {
-      const { tensor: tensorFull, canvas: canvasFull } = extractTensorAndCanvas(
-        videoEl, 0, 0, vw, vh
+    // 3. Evaluasi Kotak Viewfinder (Jika kandidat belum mantap >= 70%)
+    // Viewfinder mengisolasi area bidik 2.1:1 di tengah secara bersih tanpa background luar
+    if (topCand.prob < 0.70) {
+      const vfCoords = getViewfinderCropCoords(videoEl, el.viewfinder);
+      const { tensor: tensorVf, canvas: canvasVf } = extractTensorAndCanvas(
+        videoEl, vfCoords.sx, vfCoords.sy, vfCoords.sw, vfCoords.sh, isFrontCam
       );
 
-      let probsFull;
+      let probsVf;
       try {
-        const predFull = app.tfModel.predict(tensorFull);
-        probsFull = Array.from(await predFull.data());
+        const predVf = app.tfModel.predict(tensorVf);
+        probsVf = Array.from(await predVf.data());
       } finally {
-        tensorFull.dispose();
+        tensorVf.dispose();
       }
 
-      const rankedFull = probsFull
+      const rankedVf = probsVf
         .map((prob, idx) => ({ ...BANKNOTE_CLASSES[idx], prob }))
         .sort((a, b) => b.prob - a.prob);
 
-      const topFull = rankedFull[0];
-      const secondFull = rankedFull[1];
-      const marginFull = topFull.prob - secondFull.prob;
+      const topVf = rankedVf[0];
+      const secondVf = rankedVf[1];
+      const marginVf = topVf.prob - secondVf.prob;
 
-      // Pilih crop dengan probabilitas tertinggi dan margin paling tegas
-      if (topFull.prob > topCand.prob && marginFull >= marginCand) {
+      // Pilih hasil dengan confidence tertinggi & margin paling tegas
+      if (topVf.prob > topCand.prob && marginVf >= (marginCand * 0.85)) {
         chosenResult = {
-          source: "full-frame",
-          top: topFull,
-          second: secondFull,
-          margin: marginFull,
-          ranked: rankedFull,
-          rawProbs: probsFull,
-          canvas: canvasFull
+          source: "viewfinder",
+          top: topVf,
+          second: secondVf,
+          margin: marginVf,
+          ranked: rankedVf,
+          rawProbs: probsVf,
+          canvas: canvasVf
         };
       }
     }
