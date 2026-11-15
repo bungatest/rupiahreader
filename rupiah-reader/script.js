@@ -1,86 +1,87 @@
-"use strict";
-
-/*
- * Rupiah Reader – script.js (v9.0 Blind-Accessible Autonomous Scanner & MLOps Edition)
- * 
- * Penggerak antarmuka modern & inferensi AI in-browser via TensorFlow.js (WebGL GPU).
- * - Seluruh area kamera adalah area deteksi (Bebas ketergantungan pada crop viewfinder statis).
- * - Lokalisasi Uang Otomatis (Client-side, Fast & Lightweight):
- *   Downscale ke 320px, analisis gradient/saliency, skin-tone filtering, bounding box dengan safety margin 12%.
- * - Multi-Crop Fallback (Candidate Crop + Full-Frame Letterbox Mode 'pad' 224x224 RGB [0, 255]).
- * - Continuous Autonomous Scanning (~5-7 FPS) dengan 6-Frame Sliding Window Consensus.
- * - Non-Spamming Audio Guidance System untuk Penyandang Tunanetra (Cooldown >= 3.8s).
- * - Visual Debug Mode (?debug=1 di URL): Bounding box overlay, PIP tensor preview 224x224, FPS, voting buffer.
- * - Single Source of Truth Class Mapping (idr_1000 .. idr_100000).
- * - Kompatibilitas penuh dengan coin-reader.js dan fitur koin.
- */
-
-// ---------------------------------------------------------------------------
-// Single Source of Truth: Registri Kelas Nominal Rupiah (Sesuai Urutan Notebook)
-// ---------------------------------------------------------------------------
-const BANKNOTE_CLASSES = [
-  { index: 0, code: "idr_1000",   nominal: 1000,   name: "Satu Ribu Rupiah",       badge: "1.000",   valClass: "val-1000",   hero: "Tjut Meutia",                    color: "#65a30d" },
-  { index: 1, code: "idr_2000",   nominal: 2000,   name: "Dua Ribu Rupiah",        badge: "2.000",   valClass: "val-2000",   hero: "Mohammad Hoesni Thamrin",        color: "#64748b" },
-  { index: 2, code: "idr_5000",   nominal: 5000,   name: "Lima Ribu Rupiah",       badge: "5.000",   valClass: "val-5000",   hero: "Dr. K.H. Idham Chalid",          color: "#b45309" },
-  { index: 3, code: "idr_10000",  nominal: 10000,  name: "Sepuluh Ribu Rupiah",    badge: "10.000",  valClass: "val-10000",  hero: "Frans Kaisiepo",                 color: "#8b5cf6" },
-  { index: 4, code: "idr_20000",  nominal: 20000,  name: "Dua Puluh Ribu Rupiah",  badge: "20.000",  valClass: "val-20000",  hero: "Dr. G.S.S.J. Ratulangi",         color: "#16a34a" },
-  { index: 5, code: "idr_50000",  nominal: 50000,  name: "Lima Puluh Ribu Rupiah", badge: "50.000",  valClass: "val-50000",  hero: "Ir. H. Djuanda Kartawidjaja",    color: "#2563eb" },
-  { index: 6, code: "idr_100000", nominal: 100000, name: "Seratus Ribu Rupiah",   badge: "100.000", valClass: "val-100000", hero: "Soekarno & Mohammad Hatta",     color: "#e11d48" }
-];
-
-// Ambang Batas Keyakinan Terkalibrasi (Sesuai Standar Aksesibilitas Tunanetra & Kondisi Kamera Riil)
-const THRESHOLDS = {
-  CONFIRMED: 0.70,             // Minimal 70% rata-rata confidence untuk konfirmasi
-  MARGIN: 0.25,                // Minimal 25% margin di atas peringkat kedua
-  UNCERTAIN: 0.45,             // Ambang batas keraguan (ambigu)
-  UNKNOWN: 0.40,               // Di bawah 40% dianggap objek tak dikenal / frame kosong
-  WINDOW_SIZE: 6,              // Buffer sliding window 6 frame terakhir
-  MIN_VOTES: 4,                // Minimal 4 dari 6 frame sepakat pada nominal yang sama
-  TARGET_FRAME_INTERVAL_MS: 160, // Target ~6 FPS untuk scanning kontinu tanpa membebani GPU/CPU
-  GUIDANCE_COOLDOWN_MS: 3800,  // Jeda minimal antar petunjuk suara (mencegah spam suara)
-  SPEECH_SAME_BILL_COOLDOWN_MS: 7000 // Jeda pengucapan ulang bila uang yang sama masih di depan kamera
-};
-
-// ---------------------------------------------------------------------------
-// Utilitas Nominal & Bahasa Indonesia
-// ---------------------------------------------------------------------------
-function terbilang(n) {
-  const satuan = ["", "satu", "dua", "tiga", "empat", "lima", "enam",
-    "tujuh", "delapan", "sembilan", "sepuluh", "sebelas"];
-  const sisa = (x, kata) => (x ? " " + kata(x) : "");
-  function t(x) {
-    if (x < 12) return satuan[x];
-    if (x < 20) return t(x - 10) + " belas";
-    if (x < 100) return t(Math.floor(x / 10)) + " puluh" + sisa(x % 10, t);
-    if (x < 200) return "seratus" + sisa(x - 100, t);
-    if (x < 1000) return t(Math.floor(x / 100)) + " ratus" + sisa(x % 100, t);
-    if (x < 2000) return "seribu" + sisa(x - 1000, t);
-    if (x < 1e6) return t(Math.floor(x / 1e3)) + " ribu" + sisa(x % 1e3, t);
-    if (x < 1e9) return t(Math.floor(x / 1e6)) + " juta" + sisa(x % 1e6, t);
-    if (x < 1e12) return t(Math.floor(x / 1e9)) + " miliar" + sisa(x % 1e9, t);
-    return t(Math.floor(x / 1e12)) + " triliun" + sisa(x % 1e12, t);
-  }
-  n = Math.floor(Math.abs(n));
-  return n === 0 ? "nol" : t(n);
-}
-
-function nominalToSpeech(angka, isCoin = false) {
-  let kalimat = terbilang(angka) + " rupiah";
-  if (isCoin) kalimat += " koin";
-  return kalimat.charAt(0).toUpperCase() + kalimat.slice(1);
-}
-
-function formatRupiah(angka) {
-  return "Rp " + String(Math.floor(angka)).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-}
-
-function formatNumberShort(angka) {
-  return String(Math.floor(angka)).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-}
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
 (() => {
+  "use strict";
+
+  /*
+   * Rupiah Reader – script.js (v9.2 Blind-Accessible Autonomous Scanner & MLOps Edition)
+   * 
+   * Penggerak antarmuka modern & inferensi AI in-browser via TensorFlow.js (WebGL GPU).
+   * - Seluruh area kamera adalah area deteksi (Bebas ketergantungan pada crop viewfinder statis).
+   * - Lokalisasi Uang Otomatis (Client-side, Fast & Lightweight):
+   *   Downscale ke 320px, analisis gradient/saliency, skin-tone filtering, bounding box dengan safety margin 12%.
+   * - Multi-Crop Fallback (Candidate Crop + Full-Frame Letterbox Mode 'pad' 224x224 RGB [0, 255]).
+   * - Continuous Autonomous Scanning (~5-7 FPS) dengan 6-Frame Sliding Window Consensus.
+   * - Non-Spamming Audio Guidance System untuk Penyandang Tunanetra (Cooldown >= 3.8s).
+   * - Visual Debug Mode (?debug=1 di URL): Bounding box overlay, PIP tensor preview 224x224, FPS, voting buffer.
+   * - Single Source of Truth Class Mapping (idr_1000 .. idr_100000).
+   * - Kompatibilitas penuh dengan coin-reader.js dan fitur koin.
+   */
+
+  // ---------------------------------------------------------------------------
+  // Single Source of Truth: Registri Kelas Nominal Rupiah (Sesuai Urutan Notebook)
+  // ---------------------------------------------------------------------------
+  const BANKNOTE_CLASSES = [
+    { index: 0, code: "idr_1000",   nominal: 1000,   name: "Satu Ribu Rupiah",       badge: "1.000",   valClass: "val-1000",   hero: "Tjut Meutia",                    color: "#65a30d" },
+    { index: 1, code: "idr_2000",   nominal: 2000,   name: "Dua Ribu Rupiah",        badge: "2.000",   valClass: "val-2000",   hero: "Mohammad Hoesni Thamrin",        color: "#64748b" },
+    { index: 2, code: "idr_5000",   nominal: 5000,   name: "Lima Ribu Rupiah",       badge: "5.000",   valClass: "val-5000",   hero: "Dr. K.H. Idham Chalid",          color: "#b45309" },
+    { index: 3, code: "idr_10000",  nominal: 10000,  name: "Sepuluh Ribu Rupiah",    badge: "10.000",  valClass: "val-10000",  hero: "Frans Kaisiepo",                 color: "#8b5cf6" },
+    { index: 4, code: "idr_20000",  nominal: 20000,  name: "Dua Puluh Ribu Rupiah",  badge: "20.000",  valClass: "val-20000",  hero: "Dr. G.S.S.J. Ratulangi",         color: "#16a34a" },
+    { index: 5, code: "idr_50000",  nominal: 50000,  name: "Lima Puluh Ribu Rupiah", badge: "50.000",  valClass: "val-50000",  hero: "Ir. H. Djuanda Kartawidjaja",    color: "#2563eb" },
+    { index: 6, code: "idr_100000", nominal: 100000, name: "Seratus Ribu Rupiah",   badge: "100.000", valClass: "val-100000", hero: "Soekarno & Mohammad Hatta",     color: "#e11d48" }
+  ];
+  window.BANKNOTE_CLASSES = BANKNOTE_CLASSES;
+
+  // Ambang Batas Keyakinan Terkalibrasi (Sesuai Standar Aksesibilitas Tunanetra & Kondisi Kamera Riil)
+  const THRESHOLDS = {
+    CONFIRMED: 0.70,             // Minimal 70% rata-rata confidence untuk konfirmasi
+    MARGIN: 0.25,                // Minimal 25% margin di atas peringkat kedua
+    UNCERTAIN: 0.45,             // Ambang batas keraguan (ambigu)
+    UNKNOWN: 0.40,               // Di bawah 40% dianggap objek tak dikenal / frame kosong
+    WINDOW_SIZE: 6,              // Buffer sliding window 6 frame terakhir
+    MIN_VOTES: 4,                // Minimal 4 dari 6 frame sepakat pada nominal yang sama
+    TARGET_FRAME_INTERVAL_MS: 160, // Target ~6 FPS untuk scanning kontinu tanpa membebani GPU/CPU
+    GUIDANCE_COOLDOWN_MS: 3800,  // Jeda minimal antar petunjuk suara (mencegah spam suara)
+    SPEECH_SAME_BILL_COOLDOWN_MS: 7000 // Jeda pengucapan ulang bila uang yang sama masih di depan kamera
+  };
+
+  // ---------------------------------------------------------------------------
+  // Utilitas Nominal & Bahasa Indonesia
+  // ---------------------------------------------------------------------------
+  function terbilang(n) {
+    const satuan = ["", "satu", "dua", "tiga", "empat", "lima", "enam",
+      "tujuh", "delapan", "sembilan", "sepuluh", "sebelas"];
+    const sisa = (x, kata) => (x ? " " + kata(x) : "");
+    function t(x) {
+      if (x < 12) return satuan[x];
+      if (x < 20) return t(x - 10) + " belas";
+      if (x < 100) return t(Math.floor(x / 10)) + " puluh" + sisa(x % 10, t);
+      if (x < 200) return "seratus" + sisa(x - 100, t);
+      if (x < 1000) return t(Math.floor(x / 100)) + " ratus" + sisa(x % 100, t);
+      if (x < 2000) return "seribu" + sisa(x - 1000, t);
+      if (x < 1e6) return t(Math.floor(x / 1e3)) + " ribu" + sisa(x % 1e3, t);
+      if (x < 1e9) return t(Math.floor(x / 1e6)) + " juta" + sisa(x % 1e6, t);
+      if (x < 1e12) return t(Math.floor(x / 1e9)) + " miliar" + sisa(x % 1e9, t);
+      return t(Math.floor(x / 1e12)) + " triliun" + sisa(x % 1e12, t);
+    }
+    n = Math.floor(Math.abs(n));
+    return n === 0 ? "nol" : t(n);
+  }
+
+  function nominalToSpeech(angka, isCoin = false) {
+    let kalimat = terbilang(angka) + " rupiah";
+    if (isCoin) kalimat += " koin";
+    return kalimat.charAt(0).toUpperCase() + kalimat.slice(1);
+  }
+
+  function formatRupiah(angka) {
+    return "Rp " + String(Math.floor(angka)).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  }
+
+  function formatNumberShort(angka) {
+    return String(Math.floor(angka)).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  }
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
   // -------------------------------------------------------------------------
   // Referensi Elemen DOM
   // -------------------------------------------------------------------------
