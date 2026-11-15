@@ -22,6 +22,7 @@
   <div id="camera-stage" class="camera-stage">
     <video id="camera-preview" autoplay playsinline muted></video>
     <div class="camera-ambient-overlay"></div>
+    <canvas id="debug-overlay-canvas" class="debug-overlay-canvas" hidden></canvas>
     <canvas id="capture-canvas" hidden></canvas>
   </div>
 
@@ -148,6 +149,28 @@
         </svg>
       </button>
     </div>
+
+    <!-- Visual Debug HUD (Aktif jika URL memiliki ?debug=1) -->
+    <aside id="debug-hud" class="debug-hud" hidden aria-hidden="true">
+      <div class="debug-header">
+        <span class="debug-tag">LIVE MLOPS DEBUG</span>
+        <span id="debug-fps">0 FPS</span>
+      </div>
+      <div class="debug-pip-container">
+        <canvas id="debug-tensor-preview" width="224" height="224"></canvas>
+        <div class="debug-pip-label">Input Model (224×224 Pad)</div>
+      </div>
+      <div class="debug-metrics">
+        <div class="dbg-row"><span>Status:</span> <span id="debug-status">-</span></div>
+        <div class="dbg-row"><span>Crop:</span> <span id="debug-source">-</span></div>
+        <div class="dbg-row"><span>BBox:</span> <span id="debug-bbox">-</span></div>
+        <div class="dbg-row"><span>Kualitas:</span> <span id="debug-quality">OK</span></div>
+        <div class="dbg-row"><span>Buffer (6):</span> <span id="debug-window">-</span></div>
+        <div class="dbg-row"><span>Winner:</span> <span id="debug-winner">-</span></div>
+        <div class="dbg-row"><span>Avg Conf:</span> <span id="debug-conf">-</span></div>
+        <div class="dbg-row"><span>Margin:</span> <span id="debug-margin">-</span></div>
+      </div>
+    </aside>
   </div>
 
   <!-- Modal Bottom Sheet Menu (Total Akumulasi & Pengaturan & MLOps Diagnostic) -->

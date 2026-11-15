@@ -1,20 +1,22 @@
 "use strict";
 
 /*
- * Rupiah Reader – script.js (v8.0 Client-Side Deep Learning MLOps Edition)
+ * Rupiah Reader – script.js (v9.0 Blind-Accessible Autonomous Scanner & MLOps Edition)
  * 
  * Penggerak antarmuka modern & inferensi AI in-browser via TensorFlow.js (WebGL GPU).
- * - Arsitektur: MobileNetV2 Fine-Tuned (7 kelas nominal Rupiah).
- * - Preprocessing: 224x224 RGB, normalisasi [0, 1] (div 255.0).
- * - Spatial Ensembling: Viewfinder Crop (70%) + Full Frame (30%).
- * - Decision State Machine: SCANNING, CANDIDATE DETECTED, CONFIRMED, UNCERTAIN, UNKNOWN.
- * - Single Source of Truth Mapping: Class Index -> Nominal -> Thumbnail -> TTS -> Total.
- * - Non-intrusive MLOps Diagnostic Panel & Latency Logging.
- * - Animasi referensi GIF (laser sweep, success bloom checkmark, floating glass pill card).
+ * - Seluruh area kamera adalah area deteksi (Bebas ketergantungan pada crop viewfinder statis).
+ * - Lokalisasi Uang Otomatis (Client-side, Fast & Lightweight):
+ *   Downscale ke 320px, analisis gradient/saliency, skin-tone filtering, bounding box dengan safety margin 12%.
+ * - Multi-Crop Fallback (Candidate Crop + Full-Frame Letterbox Mode 'pad' 224x224 RGB [0, 255]).
+ * - Continuous Autonomous Scanning (~5-7 FPS) dengan 6-Frame Sliding Window Consensus.
+ * - Non-Spamming Audio Guidance System untuk Penyandang Tunanetra (Cooldown >= 3.8s).
+ * - Visual Debug Mode (?debug=1 di URL): Bounding box overlay, PIP tensor preview 224x224, FPS, voting buffer.
+ * - Single Source of Truth Class Mapping (idr_1000 .. idr_100000).
+ * - Kompatibilitas penuh dengan coin-reader.js dan fitur koin.
  */
 
 // ---------------------------------------------------------------------------
-// Single Source of Truth: Registri Kelas Nominal Rupiah
+// Single Source of Truth: Registri Kelas Nominal Rupiah (Sesuai Urutan Notebook)
 // ---------------------------------------------------------------------------
 const BANKNOTE_CLASSES = [
   { index: 0, code: "idr_1000",   nominal: 1000,   name: "Satu Ribu Rupiah",       badge: "1.000",   valClass: "val-1000",   hero: "Tjut Meutia",                    color: "#65a30d" },
@@ -26,15 +28,17 @@ const BANKNOTE_CLASSES = [
   { index: 6, code: "idr_100000", nominal: 100000, name: "Seratus Ribu Rupiah",   badge: "100.000", valClass: "val-100000", hero: "Soekarno & Mohammad Hatta",     color: "#e11d48" }
 ];
 
-// Ambang Batas Keyakinan Terkalibrasi (Sesuai Standar Aksesibilitas Tunanetra & Webcam Nyata)
+// Ambang Batas Keyakinan Terkalibrasi (Sesuai Standar Aksesibilitas Tunanetra & Kondisi Kamera Riil)
 const THRESHOLDS = {
-  CONFIRMED: 0.70,    // Minimal 70% confidence per frame
-  MARGIN: 0.25,       // Minimal 25% margin di atas peringkat kedua
-  UNCERTAIN: 0.45,    // 45% - 69% -> Ragu-ragu (minta posisikan ulang)
-  UNKNOWN: 0.45,      // < 45% -> Objek tidak dikenali
-  MIN_VOTES: 3,       // Minimal 3 dari 5 frame sepakat pada nominal yang sama
-  TOTAL_FRAMES: 5,    // Jumlah frame konsensus per scan
-  FRAME_DELAY_MS: 100 // Jeda antar sampling frame (ms)
+  CONFIRMED: 0.70,             // Minimal 70% rata-rata confidence untuk konfirmasi
+  MARGIN: 0.25,                // Minimal 25% margin di atas peringkat kedua
+  UNCERTAIN: 0.45,             // Ambang batas keraguan (ambigu)
+  UNKNOWN: 0.40,               // Di bawah 40% dianggap objek tak dikenal / frame kosong
+  WINDOW_SIZE: 6,              // Buffer sliding window 6 frame terakhir
+  MIN_VOTES: 4,                // Minimal 4 dari 6 frame sepakat pada nominal yang sama
+  TARGET_FRAME_INTERVAL_MS: 160, // Target ~6 FPS untuk scanning kontinu tanpa membebani GPU/CPU
+  GUIDANCE_COOLDOWN_MS: 3800,  // Jeda minimal antar petunjuk suara (mencegah spam suara)
+  SPEECH_SAME_BILL_COOLDOWN_MS: 7000 // Jeda pengucapan ulang bila uang yang sama masih di depan kamera
 };
 
 // ---------------------------------------------------------------------------
@@ -73,6 +77,8 @@ function formatRupiah(angka) {
 function formatNumberShort(angka) {
   return String(Math.floor(angka)).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 }
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 (() => {
   // -------------------------------------------------------------------------
@@ -132,17 +138,32 @@ function formatNumberShort(angka) {
 
     // Live status
     srStatus: $("sr-status"),
+
+    // Visual Debug Elements (?debug=1)
+    debugOverlayCanvas: $("debug-overlay-canvas"),
+    debugHud: $("debug-hud"),
+    debugFps: $("debug-fps"),
+    debugTensorPreview: $("debug-tensor-preview"),
+    debugStatus: $("debug-status"),
+    debugSource: $("debug-source"),
+    debugBbox: $("debug-bbox"),
+    debugQuality: $("debug-quality"),
+    debugWindow: $("debug-window"),
+    debugWinner: $("debug-winner"),
+    debugConf: $("debug-conf"),
+    debugMargin: $("debug-margin")
   };
 
   // -------------------------------------------------------------------------
   // Status Aplikasi (State Management)
   // -------------------------------------------------------------------------
+  const isDebugUrl = new URLSearchParams(window.location.search).get("debug") === "1";
+
   const app = {
     stream: null,
-    currentFacingMode: "environment", // default environment for mobile, fallback user
+    currentFacingMode: "environment", // default environment, fallback user
     torchOn: false,
     zoomLevel: 1,
-    scanLock: false,
     total: 0,
     lastResult: null,
     lastTapTime: 0,
@@ -155,8 +176,23 @@ function formatNumberShort(angka) {
     modelReady: false,
     backendName: "webgl",
     lastLatencyMs: 0,
-    predictionHistory: [],
-    currentState: "IDLE"
+    currentState: "IDLE",
+
+    // Continuous Autonomous Scanning & Consensus State
+    continuousScanning: true,
+    scanLoopActive: false,
+    slidingWindow: [], // Array objek: { nominal, code, prob, margin, timestamp }
+    lastSpokenNominal: null,
+    lastSpokenTimestamp: 0,
+    lastGuidanceTimestamp: 0,
+    unconfirmedFramesCount: 0,
+    consecutiveEmptyFrames: 0,
+
+    // Debug Mode & Performance Monitoring
+    isDebug: isDebugUrl,
+    fpsHistory: [],
+    lastFrameTimestamp: performance.now(),
+    currentFps: 0
   };
 
   // -------------------------------------------------------------------------
@@ -201,6 +237,18 @@ function formatNumberShort(angka) {
         resolve();
       }
     });
+  }
+
+  function speakGuidance(teks) {
+    const now = Date.now();
+    if (now - app.lastGuidanceTimestamp < THRESHOLDS.GUIDANCE_COOLDOWN_MS) {
+      return;
+    }
+    if (speechSynthesis && speechSynthesis.speaking) {
+      return;
+    }
+    app.lastGuidanceTimestamp = now;
+    speak(teks);
   }
 
   function announce(pesan) {
@@ -275,6 +323,9 @@ function formatNumberShort(angka) {
       if (el.sheetGpuVal) el.sheetGpuVal.textContent = `GPU WebGL Aktif (MobileNetV2)`;
       if (el.diagBackend) el.diagBackend.textContent = app.backendName;
       if (el.diagModel) el.diagModel.textContent = "MobileNetV2 v2.1.0";
+
+      // Jalankan loop pemindaian kontinu begitu model dan kamera siap
+      startContinuousScanLoop();
     } catch (err) {
       console.error("[MLOps Error] Gagal inisialisasi model TF.js:", err);
       if (el.chipText) el.chipText.textContent = "AI Fallback Active";
@@ -283,157 +334,422 @@ function formatNumberShort(angka) {
   }
 
   // -------------------------------------------------------------------------
-  // Perhitungan Koordinat Crop Presisi dari Kotak Viewfinder UI
+  // Lokalisasi Uang Kertas Otomatis (Lightweight Client-Side Saliency)
   // -------------------------------------------------------------------------
-  function getViewfinderCropCoords(videoEl, viewfinderEl) {
+  // Menganalisis frame video penuh secara independen dari kotak viewfinder
+  let analysisCanvas = null;
+  let analysisCtx = null;
+
+  function locateBanknoteCandidate(videoEl) {
     const vw = videoEl.videoWidth;
     const vh = videoEl.videoHeight;
     if (!vw || !vh) {
-      return { sx: 0, sy: 0, sw: 224, sh: 224 };
+      return {
+        status: "NO_FRAME",
+        qualityStatus: "OK",
+        sx: 0, sy: 0, sw: 224, sh: 224,
+        confidence: 0,
+        aspectRatio: 1.0,
+        avgBrightness: 128,
+        avgBlurEnergy: 10
+      };
     }
 
-    // Koordinat bounding box tampilan video & viewfinder di layar CSS
-    const vRect = videoEl.getBoundingClientRect();
-    const vfRect = (viewfinderEl || el.viewfinder).getBoundingClientRect();
+    const analysisW = 320;
+    const analysisH = Math.max(1, Math.round(analysisW * (vh / vw)));
 
-    // Perhitungan dimensi asli render video dengan CSS object-fit: cover
-    const scale = Math.max(vRect.width / vw, vRect.height / vh);
-    const renderedW = vw * scale;
-    const renderedH = vh * scale;
-    const renderedLeft = vRect.left + (vRect.width - renderedW) / 2;
-    const renderedTop = vRect.top + (vRect.height - renderedH) / 2;
+    if (!analysisCanvas) {
+      analysisCanvas = document.createElement("canvas");
+      analysisCanvas.width = analysisW;
+      analysisCanvas.height = analysisH;
+      analysisCtx = analysisCanvas.getContext("2d", { willReadFrequently: true });
+    } else if (analysisCanvas.height !== analysisH) {
+      analysisCanvas.height = analysisH;
+    }
 
-    // Deteksi mirroring kamera depan / webcam (CSS scaleX(-1))
-    const isMirrored = document.body.classList.contains("cam-user") ||
-      (app && app.currentFacingMode === "user");
+    // Salin frame video penuh ke kanvas analisis beresolusi rendah
+    analysisCtx.drawImage(videoEl, 0, 0, analysisW, analysisH);
+    const imgData = analysisCtx.getImageData(0, 0, analysisW, analysisH);
+    const pixels = imgData.data;
 
-    const screenLeft = isMirrored
-      ? renderedW - (vfRect.right - renderedLeft)
-      : (vfRect.left - renderedLeft);
-    const screenTop = vfRect.top - renderedTop;
+    // 1. Image Quality Metrics & Blok Energi Saliency
+    let totalLuma = 0;
+    let totalGradient = 0;
+    let sampleCount = 0;
 
-    // Konversi koordinat layar ke koordinat piksel asli video
-    const sxRaw = screenLeft / scale;
-    const syRaw = screenTop / scale;
-    const swRaw = vfRect.width / scale;
-    const shRaw = vfRect.height / scale;
+    const blockSize = 16;
+    const gridCols = Math.floor(analysisW / blockSize);
+    const gridRows = Math.floor(analysisH / blockSize);
+    const gridEnergy = new Float32Array(gridCols * gridRows);
 
-    // Clamp ke batas aman frame video asli
-    const sx = Math.max(0, Math.min(vw - 1, Math.round(sxRaw)));
-    const sy = Math.max(0, Math.min(vh - 1, Math.round(syRaw)));
-    const sw = Math.max(1, Math.min(vw - sx, Math.round(swRaw)));
-    const sh = Math.max(1, Math.min(vh - sy, Math.round(shRaw)));
+    const step = 2; // Step 2 piksel untuk kecepatan (< 5ms di CPU HP)
+    for (let y = 1; y < analysisH - 1; y += step) {
+      const rowOffset = y * analysisW;
+      const gridY = Math.min(gridRows - 1, Math.floor(y / blockSize));
 
-    return { sx, sy, sw, sh };
+      for (let x = 1; x < analysisW - 1; x += step) {
+        const idx = (rowOffset + x) * 4;
+        const r = pixels[idx];
+        const g = pixels[idx + 1];
+        const b = pixels[idx + 2];
+
+        // Luminance Y
+        const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+        totalLuma += luma;
+        sampleCount++;
+
+        // Gradient Magnitude (Perbedaan sentral horizontal & vertikal)
+        const idxRight = (rowOffset + x + 1) * 4;
+        const idxLeft  = (rowOffset + x - 1) * 4;
+        const idxDown  = ((y + 1) * analysisW + x) * 4;
+        const idxUp    = ((y - 1) * analysisW + x) * 4;
+
+        const lumaR = 0.299 * pixels[idxRight] + 0.587 * pixels[idxRight + 1] + 0.114 * pixels[idxRight + 2];
+        const lumaL = 0.299 * pixels[idxLeft]  + 0.587 * pixels[idxLeft + 1]  + 0.114 * pixels[idxLeft + 2];
+        const lumaD = 0.299 * pixels[idxDown]  + 0.587 * pixels[idxDown + 1]  + 0.114 * pixels[idxDown + 2];
+        const lumaU = 0.299 * pixels[idxUp]    + 0.587 * pixels[idxUp + 1]    + 0.114 * pixels[idxUp + 2];
+
+        const grad = Math.abs(lumaR - lumaL) + Math.abs(lumaD - lumaU);
+        totalGradient += grad;
+
+        // Heuristik Deteksi Warna Kulit Manusia (Tangan / Jari / Wajah)
+        // Reduksi bobot pada jari pemegang uang agar tidak mendominasi bounding box
+        const isSkin = (r > 75 && g > 40 && b > 20 && r > g && (r - b) > 15 && (Math.max(r, g, b) - Math.min(r, g, b) > 15));
+        const colorSpread = Math.max(r, g, b) - Math.min(r, g, b);
+
+        let saliency = grad;
+        if (isSkin) {
+          saliency *= 0.15; // Redam area jari/tangan
+        } else {
+          saliency += colorSpread * 0.40; // Beri bobot tinggi pada ukiran & motif uang kertas
+        }
+
+        const gridX = Math.min(gridCols - 1, Math.floor(x / blockSize));
+        gridEnergy[gridY * gridCols + gridX] += saliency;
+      }
+    }
+
+    const avgBrightness = totalLuma / Math.max(1, sampleCount);
+    const avgBlurEnergy = totalGradient / Math.max(1, sampleCount);
+
+    let qualityStatus = "OK";
+    if (avgBrightness < 35) {
+      qualityStatus = "DARK";
+    } else if (avgBrightness > 225) {
+      qualityStatus = "OVEREXPOSED";
+    } else if (avgBlurEnergy < 3.8) {
+      qualityStatus = "BLURRY";
+    }
+
+    // 2. Evaluasi Bounding Box Kandidat Uang
+    let totalGrid = 0;
+    for (let i = 0; i < gridEnergy.length; i++) totalGrid += gridEnergy[i];
+    const meanGrid = totalGrid / gridEnergy.length;
+    const energyThresh = meanGrid * 1.25;
+
+    let minCol = gridCols, maxCol = -1, minRow = gridRows, maxRow = -1;
+    let activeBlockCount = 0;
+
+    for (let gy = 0; gy < gridRows; gy++) {
+      for (let gx = 0; gx < gridCols; gx++) {
+        if (gridEnergy[gy * gridCols + gx] > energyThresh) {
+          activeBlockCount++;
+          if (gx < minCol) minCol = gx;
+          if (gx > maxCol) maxCol = gx;
+          if (gy < minRow) minRow = gy;
+          if (gy > maxRow) maxRow = gy;
+        }
+      }
+    }
+
+    const totalBlocks = gridCols * gridRows;
+    const coverageRatio = activeBlockCount / totalBlocks;
+
+    // Jika blok aktif terlalu sedikit, gunakan fallback frame tengah (75%)
+    if (activeBlockCount < 4 || minCol > maxCol || minRow > maxRow) {
+      return {
+        status: "NO_OBJECT",
+        qualityStatus,
+        avgBrightness,
+        avgBlurEnergy,
+        coverageRatio,
+        aspectRatio: 1.0,
+        candPixelBox: { x: 0, y: 0, w: analysisW, h: analysisH },
+        sx: Math.round(vw * 0.12),
+        sy: Math.round(vh * 0.12),
+        sw: Math.round(vw * 0.76),
+        sh: Math.round(vh * 0.76),
+        confidence: 0.1
+      };
+    }
+
+    // Konversi koordinat grid ke piksel kanvas analisis
+    let candX = minCol * blockSize;
+    let candY = minRow * blockSize;
+    let candW = (maxCol - minCol + 1) * blockSize;
+    let candH = (maxRow - minRow + 1) * blockSize;
+
+    // Beri safety margin 12% di keempat sisi agar sudut, angka nominal, & teks tidak terpotong
+    const padX = Math.round(candW * 0.12);
+    const padY = Math.round(candH * 0.12);
+    candX = Math.max(0, candX - padX);
+    candY = Math.max(0, candY - padY);
+    candW = Math.min(analysisW - candX, candW + padX * 2);
+    candH = Math.min(analysisH - candY, candH + padY * 2);
+
+    const candAreaRatio = (candW * candH) / (analysisW * analysisH);
+    const candAspectRatio = candW / Math.max(1, candH);
+
+    let candidateStatus = "OK";
+    if (candAreaRatio < 0.05) {
+      candidateStatus = "TOO_FAR";
+    } else if (candAreaRatio > 0.88 || candW >= analysisW * 0.96 || candH >= analysisH * 0.96) {
+      candidateStatus = "TOO_CLOSE";
+    }
+
+    // Petakan koordinat kanvas analisis ke koordinat video resolusi asli
+    const scaleX = vw / analysisW;
+    const scaleY = vh / analysisH;
+
+    const sx = Math.max(0, Math.min(vw - 1, Math.round(candX * scaleX)));
+    const sy = Math.max(0, Math.min(vh - 1, Math.round(candY * scaleY)));
+    const sw = Math.max(1, Math.min(vw - sx, Math.round(candW * scaleX)));
+    const sh = Math.max(1, Math.min(vh - sy, Math.round(candH * scaleY)));
+
+    return {
+      status: candidateStatus,
+      qualityStatus,
+      avgBrightness,
+      avgBlurEnergy,
+      coverageRatio: candAreaRatio,
+      aspectRatio: candAspectRatio,
+      candPixelBox: { x: candX, y: candY, w: candW, h: candH },
+      sx, sy, sw, sh,
+      confidence: Math.min(1.0, activeBlockCount / 14)
+    };
   }
 
   // -------------------------------------------------------------------------
-  // Preprocessing Citra Identik dengan Fase Training (Mode 'pad' 224x224 RGB)
+  // Preprocessing Citra: Mode 'pad' (ImageOps.contain 224x224 RGB [0, 255])
   // -------------------------------------------------------------------------
-  function extractTensorFromCrop(videoEl, sx, sy, sw, sh) {
-    return tf.tidy(() => {
-      // 1. Kanvas target 224x224 dengan latar belakang hitam rgb(0, 0, 0)
-      const cropCanvas = document.createElement("canvas");
-      cropCanvas.width = 224;
-      cropCanvas.height = 224;
-      const ctx = cropCanvas.getContext("2d", { willReadFrequently: true });
+  // Mengembalikan Tensor float32 [1, 224, 224, 3] dalam rentang [0, 255] RGB
+  // serta kanvas 224x224 untuk preview visual di mode debug (?debug=1)
+  let preprocessCanvas = null;
+  let preprocessCtx = null;
 
-      // Isi kanvas dengan warna hitam pekat rgb(0, 0, 0) untuk letterbox padding
-      ctx.fillStyle = "#000000";
-      ctx.fillRect(0, 0, 224, 224);
+  function extractTensorAndCanvas(videoEl, sx, sy, sw, sh) {
+    if (!preprocessCanvas) {
+      preprocessCanvas = document.createElement("canvas");
+      preprocessCanvas.width = 224;
+      preprocessCanvas.height = 224;
+      preprocessCtx = preprocessCanvas.getContext("2d", { willReadFrequently: true });
+    }
 
-      // 2. Mode 'pad' (ImageOps.contain): jaga aspect ratio asli
-      const containScale = Math.min(224 / sw, 224 / sh);
-      const destW = Math.max(1, Math.round(sw * containScale));
-      const destH = Math.max(1, Math.round(sh * containScale));
-      const destX = Math.round((224 - destW) / 2);
-      const destY = Math.round((224 - destH) / 2);
+    // 1. Isi kanvas dengan padding hitam rgb(0,0,0) (persis ImageOps.contain di notebook)
+    preprocessCtx.fillStyle = "#000000";
+    preprocessCtx.fillRect(0, 0, 224, 224);
 
-      // Kualitas rendering tinggi (bilinear/bicubic smoothing)
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = "high";
+    // 2. Mode 'pad': jaga rasio aspek asli uang kertas
+    const containScale = Math.min(224 / sw, 224 / sh);
+    const destW = Math.max(1, Math.round(sw * containScale));
+    const destH = Math.max(1, Math.round(sh * containScale));
+    const destX = Math.round((224 - destW) / 2);
+    const destY = Math.round((224 - destH) / 2);
 
-      // Gambar area crop viewfinder ke bagian tengah kanvas berlatar hitam
-      ctx.drawImage(videoEl, sx, sy, sw, sh, destX, destY, destW, destH);
+    preprocessCtx.imageSmoothingEnabled = true;
+    preprocessCtx.imageSmoothingQuality = "high";
+    preprocessCtx.drawImage(videoEl, sx, sy, sw, sh, destX, destY, destW, destH);
 
-      // 3. Konversi ke Tensor float32 [1, 224, 224, 3] dalam rentang [0, 255] RGB
-      // CATATAN: TIDAK DIBAGI 255.0 (Mencegah double rescaling karena model sudah
-      // memiliki layer internal Rescaling(1./255))
-      const tensor = tf.browser.fromPixels(cropCanvas)
+    // 3. Konversi ke Tensor float32 [1, 224, 224, 3] dalam rentang [0, 255] RGB
+    // CATATAN: TIDAK DIBAGI 255.0 (Model sudah memiliki layer internal Rescaling(1./255))
+    const tensor = tf.tidy(() => {
+      return tf.browser.fromPixels(preprocessCanvas)
         .toFloat()
-        .expandDims(0); // Shape [1, 224, 224, 3], Nilai piksel [0, 255]
-
-      return tensor;
+        .expandDims(0);
     });
+
+    return { tensor, canvas: preprocessCanvas };
   }
 
   // -------------------------------------------------------------------------
-  // Inferensi Kamera: Fokus Penuh Area Kotak Bidik (Viewfinder)
+  // Inferensi Multi-Crop Terkalibrasi (Candidate Crop + Full Frame Fallback)
   // -------------------------------------------------------------------------
-  async function runInBrowserBanknoteInference() {
-    const v = el.video;
-    if (!v || !v.videoWidth || !app.tfModel) {
-      return null;
-    }
+  async function predictBanknoteFrame(videoEl) {
+    const vw = videoEl.videoWidth;
+    const vh = videoEl.videoHeight;
+    if (!vw || !vh || !app.tfModel) return null;
 
     const t0 = performance.now();
 
-    // 1. Ambil koordinat crop persis sesuai kotak bidik (viewfinder) di UI
-    const { sx, sy, sw, sh } = getViewfinderCropCoords(v, el.viewfinder);
+    // 1. Lokalisasi wilayah uang kertas di seluruh frame kamera
+    const loc = locateBanknoteCandidate(videoEl);
 
-    // 2. Ekstrak tensor dengan resize mode 'pad' (224x224 dengan padding hitam rgb(0,0,0))
-    // HANYA meng-crop area di dalam kotak bidik (HAPUS tensorFull dan spatial ensembling
-    // agar warna pakaian/latar belakang di luar kotak tidak mengacaukan prediksi)
-    const tensorCrop = extractTensorFromCrop(v, sx, sy, sw, sh);
+    // 2. Ekstrak tensor kandidat hasil lokalisasi
+    const { tensor: tensorCand, canvas: canvasCand } = extractTensorAndCanvas(
+      videoEl, loc.sx, loc.sy, loc.sw, loc.sh
+    );
 
-    let probsArr;
+    let probsCand;
     try {
-      const pred = app.tfModel.predict(tensorCrop);
-      probsArr = Array.from(await pred.data());
+      const predCand = app.tfModel.predict(tensorCand);
+      probsCand = Array.from(await predCand.data());
     } finally {
-      tensorCrop.dispose();
+      tensorCand.dispose();
+    }
+
+    const rankedCand = probsCand
+      .map((prob, idx) => ({ ...BANKNOTE_CLASSES[idx], prob }))
+      .sort((a, b) => b.prob - a.prob);
+
+    const topCand = rankedCand[0];
+    const secondCand = rankedCand[1];
+    const marginCand = topCand.prob - secondCand.prob;
+
+    let chosenResult = {
+      source: "candidate",
+      top: topCand,
+      second: secondCand,
+      margin: marginCand,
+      ranked: rankedCand,
+      rawProbs: probsCand,
+      canvas: canvasCand
+    };
+
+    // 3. Fallback Multi-Crop jika kandidat ragu atau status bukan OK
+    // Memastikan jika uang tidak terlokalisasi sempurna, model tetap memeriksa frame penuh
+    if (topCand.prob < 0.65 || loc.status !== "OK") {
+      const { tensor: tensorFull, canvas: canvasFull } = extractTensorAndCanvas(
+        videoEl, 0, 0, vw, vh
+      );
+
+      let probsFull;
+      try {
+        const predFull = app.tfModel.predict(tensorFull);
+        probsFull = Array.from(await predFull.data());
+      } finally {
+        tensorFull.dispose();
+      }
+
+      const rankedFull = probsFull
+        .map((prob, idx) => ({ ...BANKNOTE_CLASSES[idx], prob }))
+        .sort((a, b) => b.prob - a.prob);
+
+      const topFull = rankedFull[0];
+      const secondFull = rankedFull[1];
+      const marginFull = topFull.prob - secondFull.prob;
+
+      // Pilih crop dengan probabilitas tertinggi dan margin paling tegas
+      if (topFull.prob > topCand.prob && marginFull >= marginCand) {
+        chosenResult = {
+          source: "full-frame",
+          top: topFull,
+          second: secondFull,
+          margin: marginFull,
+          ranked: rankedFull,
+          rawProbs: probsFull,
+          canvas: canvasFull
+        };
+      }
     }
 
     const latency = Math.round(performance.now() - t0);
     app.lastLatencyMs = latency;
 
-    // 3. Cari Argmax (Top Predicted Class) & Ranking Top-3
-    const ranked = probsArr
-      .map((prob, idx) => ({ ...BANKNOTE_CLASSES[idx], prob }))
-      .sort((a, b) => b.prob - a.prob);
-
-    const top = ranked[0];
-    const second = ranked[1];
-    const margin = top.prob - second.prob;
-
-    // 4. Decision State Machine Terkalibrasi
-    let state = "CONFIRMED";
-    if (top.prob >= THRESHOLDS.CONFIRMED && margin >= THRESHOLDS.MARGIN) {
-      state = "CONFIRMED";
-    } else if (top.prob >= THRESHOLDS.UNCERTAIN) {
-      state = "UNCERTAIN";
-    } else {
-      state = "UNKNOWN";
-    }
-
-    app.currentState = state;
-
-    // 5. Update MLOps Diagnostic Panel
-    updateDiagnosticPanel(state, top, ranked.slice(0, 3), latency);
-
     return {
-      state,
-      topClass: top,
-      ranked,
-      latency,
-      confidence: top.prob,
-      margin,
-      rawProbs: probsArr
+      loc,
+      chosen: chosenResult,
+      latency
     };
   }
 
   // -------------------------------------------------------------------------
-  // Render MLOps Diagnostic Panel
+  // Mode Debug Visual (?debug=1 di URL)
+  // -------------------------------------------------------------------------
+  function renderDebugOverlay(loc, chosen, latency, fps) {
+    if (!app.isDebug || !el.debugOverlayCanvas || !el.debugHud) return;
+
+    el.debugOverlayCanvas.hidden = false;
+    el.debugHud.hidden = false;
+
+    const overlay = el.debugOverlayCanvas;
+    const v = el.video;
+    const vRect = v.getBoundingClientRect();
+
+    if (overlay.width !== vRect.width || overlay.height !== vRect.height) {
+      overlay.width = vRect.width;
+      overlay.height = vRect.height;
+    }
+
+    const ctx = overlay.getContext("2d");
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+    if (loc && loc.sx !== undefined && v.videoWidth) {
+      // Petakan koordinat video asli ke koordinat layar kanvas
+      const scale = Math.max(vRect.width / v.videoWidth, vRect.height / v.videoHeight);
+      const renderedW = v.videoWidth * scale;
+      const renderedH = v.videoHeight * scale;
+      const leftOffset = (vRect.width - renderedW) / 2;
+      const topOffset = (vRect.height - renderedH) / 2;
+
+      const isMirrored = document.body.classList.contains("cam-user") || (app.currentFacingMode === "user");
+
+      let boxX = leftOffset + loc.sx * scale;
+      if (isMirrored) {
+        boxX = vRect.width - (leftOffset + (loc.sx + loc.sw) * scale);
+      }
+      const boxY = topOffset + loc.sy * scale;
+      const boxW = loc.sw * scale;
+      const boxH = loc.sh * scale;
+
+      // Gambar Bounding Box Hijau Neon di Sekitar Kandidat Uang
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = loc.status === "OK" ? "#22c55e" : "#f59e0b";
+      ctx.fillStyle = loc.status === "OK" ? "rgba(34, 197, 94, 0.12)" : "rgba(245, 158, 11, 0.12)";
+      ctx.strokeRect(boxX, boxY, boxW, boxH);
+      ctx.fillRect(boxX, boxY, boxW, boxH);
+
+      // Label Bounding Box
+      ctx.font = "bold 11px monospace";
+      ctx.fillStyle = "#ffffff";
+      const tagText = `${chosen ? chosen.top.badge : "Target"} (${loc.aspectRatio.toFixed(2)}:1)`;
+      const textW = ctx.measureText(tagText).width;
+      ctx.fillStyle = loc.status === "OK" ? "#15803d" : "#b45309";
+      ctx.fillRect(boxX, Math.max(0, boxY - 18), textW + 10, 18);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(tagText, boxX + 5, Math.max(13, boxY - 4));
+    }
+
+    // Perbarui PIP Thumbnail Canvas 224x224
+    if (chosen && chosen.canvas && el.debugTensorPreview) {
+      const pCtx = el.debugTensorPreview.getContext("2d");
+      pCtx.drawImage(chosen.canvas, 0, 0, 224, 224);
+    }
+
+    // Perbarui HUD Metrics
+    if (el.debugFps) el.debugFps.textContent = `${fps} FPS`;
+    if (el.debugStatus) el.debugStatus.textContent = loc ? loc.status : "-";
+    if (el.debugSource) el.debugSource.textContent = chosen ? chosen.source : "-";
+    if (el.debugBbox && loc) el.debugBbox.textContent = `${loc.sw}×${loc.sh}`;
+    if (el.debugQuality && loc) el.debugQuality.textContent = `${loc.qualityStatus} (L:${Math.round(loc.avgBrightness)})`;
+
+    // Riwayat 6 Frame
+    if (el.debugWindow) {
+      const winStr = app.slidingWindow.map(f => {
+        const k = f.nominal >= 1000 ? `${f.nominal / 1000}k` : f.nominal;
+        return k;
+      }).join(",");
+      el.debugWindow.textContent = winStr || "[]";
+    }
+
+    if (chosen) {
+      if (el.debugWinner) el.debugWinner.textContent = `Rp ${chosen.top.badge}`;
+      if (el.debugConf) el.debugConf.textContent = `${(chosen.top.prob * 100).toFixed(1)}%`;
+      if (el.debugMargin) el.debugMargin.textContent = `+${(chosen.margin * 100).toFixed(1)}%`;
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Render MLOps Diagnostic Panel (Di dalam Bottom Sheet Menu)
   // -------------------------------------------------------------------------
   function updateDiagnosticPanel(state, top, top3, latency) {
     if (!el.diagStateBadge) return;
@@ -456,6 +772,241 @@ function formatNumberShort(angka) {
   }
 
   // -------------------------------------------------------------------------
+  // UI Helpers (Animasi Sukses & Pembaruan Kartu)
+  // -------------------------------------------------------------------------
+  function showSuccessBloom() {
+    document.body.classList.remove("state-scanning");
+    document.body.classList.add("show-success");
+    setTimeout(() => {
+      document.body.classList.remove("show-success");
+    }, 750);
+  }
+
+  function updateResultUI(banknote) {
+    if (el.banknoteThumb && el.thumbNumber) {
+      el.banknoteThumb.className = `banknote-thumbnail ${banknote.valClass}`;
+      el.thumbNumber.textContent = banknote.badge;
+    }
+
+    el.bottomCard.className = "bottom-pill-card state-result";
+    el.pillSubtitle.textContent = "Hasil Deteksi";
+    el.pillTitle.textContent = formatRupiah(banknote.nominal);
+
+    if (app.resetCardTimer) clearTimeout(app.resetCardTimer);
+    app.resetCardTimer = setTimeout(() => {
+      // Jika tidak ada uang lagi di frame, kembali ke state idle
+      if (!app.lastSpokenNominal) {
+        el.bottomCard.className = "bottom-pill-card state-idle";
+        el.pillSubtitle.textContent = "Scanning...";
+        el.pillTitle.textContent = "Arahkan Uang ke Kamera";
+      }
+    }, 4500);
+  }
+
+  // -------------------------------------------------------------------------
+  // Loop Pemindaian Kontinu & Konsensus Sliding Window (Aksesibilitas Tunanetra)
+  // -------------------------------------------------------------------------
+  async function startContinuousScanLoop() {
+    if (app.scanLoopActive) return;
+    app.scanLoopActive = true;
+
+    while (app.continuousScanning) {
+      const loopStart = performance.now();
+
+      // Hitung FPS real-time
+      app.currentFps = Math.round(1000 / Math.max(1, loopStart - app.lastFrameTimestamp));
+      app.lastFrameTimestamp = loopStart;
+
+      // Jika video belum siap atau model belum termuat, tunggu
+      if (!el.video || !el.video.videoWidth || !app.modelReady || !app.tfModel) {
+        await sleep(200);
+        continue;
+      }
+
+      try {
+        const frameData = await predictBanknoteFrame(el.video);
+        if (frameData) {
+          const { loc, chosen, latency } = frameData;
+
+          // Perbarui Debug Overlay
+          renderDebugOverlay(loc, chosen, latency, app.currentFps);
+
+          // Evaluasi deteksi frame
+          if (chosen && chosen.top.prob >= THRESHOLDS.UNKNOWN) {
+            app.slidingWindow.push({
+              nominal: chosen.top.nominal,
+              code: chosen.top.code,
+              prob: chosen.top.prob,
+              margin: chosen.margin,
+              timestamp: Date.now()
+            });
+
+            if (app.slidingWindow.length > THRESHOLDS.WINDOW_SIZE) {
+              app.slidingWindow.shift();
+            }
+            app.consecutiveEmptyFrames = 0;
+          } else {
+            app.consecutiveEmptyFrames++;
+            // Jika uang disingkirkan dari depan kamera selama >= 6 frame berturut-turut (~1.2 detik),
+            // reset lastSpokenNominal agar nominal berikutnya (atau uang baru) dapat diucapkan kembali!
+            if (app.consecutiveEmptyFrames >= 6) {
+              app.lastSpokenNominal = null;
+              if (app.slidingWindow.length > 0) {
+                app.slidingWindow.shift();
+              }
+            }
+          }
+
+          // -----------------------------------------------------------------
+          // Evaluasi Konsensus Multi-Frame (6 Frame Buffer)
+          // -----------------------------------------------------------------
+          if (app.slidingWindow.length >= 4) {
+            const votes = {};
+            for (const item of app.slidingWindow) {
+              votes[item.nominal] = (votes[item.nominal] || 0) + 1;
+            }
+
+            const sortedVotes = Object.entries(votes).sort((a, b) => b[1] - a[1]);
+            const [votedNomStr, voteCount] = sortedVotes[0] || [null, 0];
+            const votedNominal = votedNomStr ? parseInt(votedNomStr, 10) : null;
+
+            const winFrames = app.slidingWindow.filter(f => f.nominal === votedNominal);
+            const avgConf = winFrames.reduce((acc, f) => acc + f.prob, 0) / winFrames.length;
+            const avgMargin = winFrames.reduce((acc, f) => acc + f.margin, 0) / winFrames.length;
+
+            const isConfirmed = votedNominal &&
+              (voteCount >= THRESHOLDS.MIN_VOTES) &&
+              (avgConf >= THRESHOLDS.CONFIRMED) &&
+              (avgMargin >= THRESHOLDS.MARGIN);
+
+            if (isConfirmed) {
+              app.unconfirmedFramesCount = 0;
+              const matchedClass = BANKNOTE_CLASSES.find(c => c.nominal === votedNominal);
+
+              if (matchedClass) {
+                app.currentState = "CONFIRMED";
+                updateDiagnosticPanel("CONFIRMED", matchedClass, chosen.ranked.slice(0, 3), latency);
+
+                // CEGAH SPAM SUARA:
+                // Ucapkan SEKALI saja untuk setiap uang yang dihadirkan.
+                // Jangan ulangi ucapan jika uang yang sama masih di depan kamera!
+                if (app.lastSpokenNominal !== matchedClass.nominal) {
+                  app.lastSpokenNominal = matchedClass.nominal;
+                  app.lastSpokenTimestamp = Date.now();
+                  app.lastResult = {
+                    ...matchedClass,
+                    type: "banknote",
+                    confidence: avgConf,
+                    displayText: formatRupiah(matchedClass.nominal),
+                    speechText: nominalToSpeech(matchedClass.nominal)
+                  };
+
+                  getar([80, 40, 80]);
+                  showSuccessBloom();
+                  speak(nominalToSpeech(matchedClass.nominal));
+                  updateResultUI(matchedClass);
+                } else {
+                  // Uang yang sama masih di depan kamera, pertahankan tampilan hasil tanpa suara berulang
+                  updateResultUI(matchedClass);
+                }
+              }
+            } else {
+              // Belum tercapai konsensus
+              app.unconfirmedFramesCount++;
+              app.currentState = (avgConf >= THRESHOLDS.UNCERTAIN) ? "UNCERTAIN" : "UNKNOWN";
+              updateDiagnosticPanel(app.currentState, chosen.top, chosen.ranked.slice(0, 3), latency);
+
+              // -------------------------------------------------------------
+              // Panduan Suara Non-Spamming untuk Penyandang Tunanetra
+              // -------------------------------------------------------------
+              if (app.unconfirmedFramesCount >= 14) {
+                if (loc.qualityStatus === "DARK" || loc.qualityStatus === "BLURRY" || loc.qualityStatus === "OVEREXPOSED") {
+                  speakGuidance("Pencahayaan kurang atau kamera buram, nyalakan lampu atau senter.");
+                } else if (loc.status === "NO_OBJECT" || loc.status === "TOO_FAR") {
+                  speakGuidance("Arahkan uang lebih dekat ke kamera.");
+                } else if (loc.status === "TOO_CLOSE") {
+                  speakGuidance("Jauhkan sedikit uangnya.");
+                } else if (sortedVotes.length >= 2 && voteCount <= 3) {
+                  speakGuidance("Ubah sedikit sudut uang.");
+                }
+              }
+            }
+          }
+        }
+      } catch (loopErr) {
+        console.warn("[MLOps Loop] Peringatan frame:", loopErr);
+      }
+
+      // Pertahankan target interval ~160ms (~6 FPS)
+      const elapsed = performance.now() - loopStart;
+      const waitTime = Math.max(25, THRESHOLDS.TARGET_FRAME_INTERVAL_MS - elapsed);
+      await sleep(waitTime);
+    }
+
+    app.scanLoopActive = false;
+  }
+
+  // -------------------------------------------------------------------------
+  // Interaksi Manual: Ketuk Layar (Single Tap = Re-Scan & Force Speak)
+  // -------------------------------------------------------------------------
+  async function forceScanAndSpeak() {
+    getar(35);
+    app.lastSpokenNominal = null; // Reset kunci pengucapan agar membaca ulang
+    app.unconfirmedFramesCount = 0;
+
+    el.bottomCard.className = "bottom-pill-card state-scanning";
+    el.pillSubtitle.textContent = "Scanning...";
+    el.pillTitle.textContent = "Menganalisis uang...";
+
+    if (!app.tfModel) {
+      speak("Memuat model kecerdasan buatan, mohon tunggu sebentar.");
+      return;
+    }
+
+    // Ambil beberapa frame cepat untuk konfirmasi instan
+    let bestPred = null;
+    let highestConf = -1;
+
+    for (let i = 0; i < 3; i++) {
+      const res = await predictBanknoteFrame(el.video);
+      if (res && res.chosen && res.chosen.top.prob > highestConf) {
+        highestConf = res.chosen.top.prob;
+        bestPred = res.chosen;
+      }
+      await sleep(60);
+    }
+
+    if (bestPred && bestPred.top.prob >= THRESHOLDS.CONFIRMED && bestPred.margin >= THRESHOLDS.MARGIN) {
+      const selected = bestPred.top;
+      app.lastSpokenNominal = selected.nominal;
+      app.lastResult = {
+        ...selected,
+        type: "banknote",
+        confidence: bestPred.top.prob,
+        displayText: formatRupiah(selected.nominal),
+        speechText: nominalToSpeech(selected.nominal)
+      };
+
+      getar([80, 40, 80]);
+      showSuccessBloom();
+      speak(nominalToSpeech(selected.nominal));
+      updateResultUI(selected);
+    } else if (bestPred && bestPred.top.prob >= THRESHOLDS.UNCERTAIN) {
+      el.bottomCard.className = "bottom-pill-card state-idle";
+      el.pillSubtitle.textContent = "Kurang Jelas";
+      el.pillTitle.textContent = "Ubah Sudut Uang";
+      getar([60, 40, 60]);
+      speak("Uang belum terbaca jelas. Mohon ubah sedikit sudut uang.");
+    } else {
+      el.bottomCard.className = "bottom-pill-card state-idle";
+      el.pillSubtitle.textContent = "Tidak Terdeteksi";
+      el.pillTitle.textContent = "Dekatkan Uang ke Kamera";
+      getar([100, 50, 100]);
+      speak("Uang tidak terdeteksi. Dekatkan uang ke kamera lalu coba lagi.");
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // Akses Kamera Penuh & Switch Kamera
   // -------------------------------------------------------------------------
   async function startCamera(facingMode = "environment") {
@@ -464,7 +1015,6 @@ function formatNumberShort(angka) {
       app.stream = null;
     }
 
-    // Deteksi jika platform laptop/desktop: ideal "user", mobile: ideal "environment"
     const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     const targetFacing = isMobile ? facingMode : "user";
     app.currentFacingMode = targetFacing;
@@ -563,187 +1113,7 @@ function formatNumberShort(angka) {
   }
 
   // -------------------------------------------------------------------------
-  // Alur Pemindaian Multi-Frame Consensus (Aman untuk Penyandang Tunanetra)
-  // -------------------------------------------------------------------------
-  async function triggerScan() {
-    if (app.scanLock) return;
-    app.scanLock = true;
-
-    if (app.resetCardTimer) {
-      clearTimeout(app.resetCardTimer);
-      app.resetCardTimer = null;
-    }
-
-    // 1. Masuk ke State: SCANNING
-    document.body.classList.remove("show-success");
-    document.body.classList.add("state-scanning");
-    
-    el.bottomCard.className = "bottom-pill-card state-scanning";
-    el.pillSubtitle.textContent = "Scanning...";
-    el.pillTitle.textContent = "Memverifikasi konsensus uang...";
-    getar(45);
-
-    try {
-      // Pastikan model siap
-      if (!app.tfModel) {
-        console.warn("[MLOps] Model belum siap saat pemindaian, mencoba memuat...");
-        await initTfjsModel();
-      }
-
-      // Kumpulkan 5 frame berturut-turut untuk voting multi-frame
-      const votes = {};
-      const voteClasses = {};
-      const classProbSums = new Array(BANKNOTE_CLASSES.length).fill(0);
-      let totalLatency = 0;
-      let lastRanked = null;
-
-      for (let i = 0; i < THRESHOLDS.TOTAL_FRAMES; i++) {
-        const frameRes = await runInBrowserBanknoteInference();
-        if (frameRes && frameRes.rawProbs) {
-          totalLatency += frameRes.latency;
-          lastRanked = frameRes.ranked;
-
-          // Akumulasi probabilitas per kelas
-          frameRes.rawProbs.forEach((p, idx) => {
-            classProbSums[idx] += p / THRESHOLDS.TOTAL_FRAMES;
-          });
-
-          // Catat vote jika frame memiliki confidence tinggi & margin jelas
-          if (frameRes.topClass && frameRes.confidence >= THRESHOLDS.CONFIRMED && frameRes.margin >= THRESHOLDS.MARGIN) {
-            const nom = frameRes.topClass.nominal;
-            votes[nom] = (votes[nom] || 0) + 1;
-            voteClasses[nom] = frameRes.topClass;
-          }
-        }
-
-        if (i < THRESHOLDS.TOTAL_FRAMES - 1) {
-          await new Promise((r) => setTimeout(r, THRESHOLDS.FRAME_DELAY_MS));
-        }
-      }
-
-      // Hitung ranking rata-rata dari seluruh frame
-      const avgRanked = classProbSums
-        .map((prob, idx) => ({ ...BANKNOTE_CLASSES[idx], prob }))
-        .sort((a, b) => b.prob - a.prob);
-
-      const avgTop = avgRanked[0];
-      const avgSecond = avgRanked[1];
-      const avgMargin = avgTop.prob - avgSecond.prob;
-      const avgLatency = Math.round(totalLatency / THRESHOLDS.TOTAL_FRAMES);
-
-      // Urutkan perolehan suara (voting)
-      const sortedVotes = Object.entries(votes).sort((a, b) => b[1] - a[1]);
-      const [votedNominalStr, voteCount] = sortedVotes[0] || [null, 0];
-      const votedNominal = votedNominalStr ? parseInt(votedNominalStr, 10) : null;
-
-      // Evaluasi Keputusan Akhir:
-      // CONFIRMED HANYA JIKA konsisten multi-frame (minimal 3 dari 5 frame sepakat ATAU
-      // probabilitas rata-rata multi-frame sangat meyakinkan >= 75% dengan margin >= 30%)
-      const isConsistentVote = votedNominal && voteCount >= THRESHOLDS.MIN_VOTES && (votedNominal === avgTop.nominal);
-      const isStrongEnsemble = avgTop.prob >= 0.75 && avgMargin >= 0.30;
-
-      let finalState = "UNKNOWN";
-      let confirmedClass = null;
-
-      if (isConsistentVote || isStrongEnsemble) {
-        finalState = "CONFIRMED";
-        confirmedClass = voteClasses[votedNominal] || avgTop;
-      } else if (avgTop.prob >= THRESHOLDS.UNCERTAIN || voteCount >= 1) {
-        finalState = "UNCERTAIN";
-      } else {
-        finalState = "UNKNOWN";
-      }
-
-      updateDiagnosticPanel(finalState, confirmedClass || avgTop, avgRanked.slice(0, 3), avgLatency);
-
-      if (finalState === "UNKNOWN") {
-        document.body.classList.remove("state-scanning");
-        el.bottomCard.className = "bottom-pill-card state-idle";
-        el.pillSubtitle.textContent = "Tidak Terdeteksi";
-        el.pillTitle.textContent = "Arahkan Uang ke Kamera";
-        getar([100, 50, 100]);
-        speak("Uang tidak terdeteksi. Silakan posisikan seluruh uang kertas di dalam kotak bidik lalu ketuk layar lagi.");
-
-        app.resetCardTimer = setTimeout(() => {
-          el.pillSubtitle.textContent = "Scanning...";
-          el.pillTitle.textContent = "Posisikan Uang Kertas di Sini";
-        }, 3500);
-        return;
-      }
-
-      if (finalState === "UNCERTAIN") {
-        document.body.classList.remove("state-scanning");
-        el.bottomCard.className = "bottom-pill-card state-idle";
-        el.pillSubtitle.textContent = "Kurang Jelas";
-        el.pillTitle.textContent = "Luruskan Uang di Kotak";
-        getar([60, 40, 60]);
-        speak("Uang belum terbaca jelas. Mohon luruskan dan masukkan seluruh uang ke dalam kotak lalu ketuk layar lagi.");
-
-        app.resetCardTimer = setTimeout(() => {
-          el.pillSubtitle.textContent = "Scanning...";
-          el.pillTitle.textContent = "Posisikan Uang Kertas di Sini";
-        }, 3500);
-        return;
-      }
-
-      // STATE CONFIRMED:
-      // Ambil objek kelas nominal yang terkonfirmasi (SINGLE SOURCE OF TRUTH)
-      const selected = confirmedClass;
-
-      const res = {
-        type: "banknote",
-        nominal: selected.nominal,
-        confidence: avgTop.prob,
-        speechText: nominalToSpeech(selected.nominal),
-        displayText: formatRupiah(selected.nominal),
-        badgeText: selected.badge,
-        valClass: selected.valClass,
-        hero: selected.hero
-      };
-
-      app.lastResult = res;
-
-      // 2. Masuk ke State: SUCCESS BLOOM CHECKMARK di tengah viewfinder
-      document.body.classList.remove("state-scanning");
-      document.body.classList.add("show-success");
-      getar([80, 40, 80]);
-
-      // Suara pembacaan nominal langsung
-      speak(res.speechText);
-
-      // 3. Masuk ke State: RESULT DISPLAY di Bottom Pill Card
-      await new Promise((r) => setTimeout(r, 600));
-      document.body.classList.remove("show-success");
-
-      // Perbarui thumbnail uang mini realistis (100% konsisten)
-      el.banknoteThumb.className = `banknote-thumbnail ${res.valClass}`;
-      el.thumbNumber.textContent = res.badgeText;
-
-      el.bottomCard.className = "bottom-pill-card state-result";
-      el.pillSubtitle.textContent = "Hasil Deteksi";
-      el.pillTitle.textContent = res.displayText;
-
-      // Kembali dengan mulus ke State Idle setelah 4.5 detik
-      app.resetCardTimer = setTimeout(() => {
-        el.bottomCard.className = "bottom-pill-card state-idle";
-        el.pillSubtitle.textContent = "Scanning...";
-        el.pillTitle.textContent = "Posisikan Uang Kertas di Sini";
-      }, 4500);
-
-    } catch (err) {
-      console.error("Scan error:", err);
-      document.body.classList.remove("state-scanning", "show-success");
-      el.bottomCard.className = "bottom-pill-card state-idle";
-      el.pillSubtitle.textContent = "Pindai Uang";
-      el.pillTitle.textContent = "Dekatkan uang ke kamera";
-      speak("Uang belum terdeteksi. Dekatkan uang ke kamera lalu ketuk lagi.");
-    } finally {
-      app.scanLock = false;
-    }
-  }
-
-  // -------------------------------------------------------------------------
-  // Akumulasi Total Uang (Hanya via Interaksi Double Tap / Menu)
+  // Akumulasi Total Uang (Hanya via Double Tap / Menu)
   // -------------------------------------------------------------------------
   function addToTotal() {
     if (!app.lastResult || !app.lastResult.nominal) {
@@ -764,7 +1134,7 @@ function formatNumberShort(angka) {
   }
 
   // -------------------------------------------------------------------------
-  // Dispatcher Ketuk Layar (Single Tap = Scan, Double Tap = Add to Total)
+  // Dispatcher Ketuk Layar (Single Tap = Re-Scan, Double Tap = Add to Total)
   // -------------------------------------------------------------------------
   function handleScreenTap() {
     const now = performance.now();
@@ -784,7 +1154,7 @@ function formatNumberShort(angka) {
       if (app.tapTimer) clearTimeout(app.tapTimer);
       app.tapTimer = setTimeout(() => {
         app.tapTimer = null;
-        triggerScan();
+        forceScanAndSpeak();
       }, 240);
     }
   }
@@ -809,16 +1179,13 @@ function formatNumberShort(angka) {
   // Pendaftaran Event Listeners
   // -------------------------------------------------------------------------
   function attachEventListeners() {
-    // Layar penuh untuk ketuk
     if (el.tapArea) {
       el.tapArea.addEventListener("click", (e) => {
-        // Cegah trigger jika mengklik tombol kontrol
         if (e.target.closest(".nav-circle-btn, .floating-zoom-btn, .pill-torch-btn, .menu-bottom-sheet")) return;
         handleScreenTap();
       });
     }
 
-    // Tombol senter
     if (el.btnTorch) {
       el.btnTorch.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -826,7 +1193,6 @@ function formatNumberShort(angka) {
       });
     }
 
-    // Tombol zoom
     if (el.btnZoom) {
       el.btnZoom.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -834,7 +1200,6 @@ function formatNumberShort(angka) {
       });
     }
 
-    // Tombol switch kamera
     if (el.btnSwitchCam) {
       el.btnSwitchCam.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -842,7 +1207,6 @@ function formatNumberShort(angka) {
       });
     }
 
-    // Tombol menu
     if (el.btnMenu) {
       el.btnMenu.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -850,7 +1214,6 @@ function formatNumberShort(angka) {
       });
     }
 
-    // Chip AI untuk buka menu/diagnostik
     if (el.aiChip) {
       el.aiChip.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -858,7 +1221,6 @@ function formatNumberShort(angka) {
       });
     }
 
-    // Tombol tutup menu
     if (el.btnCloseSheet) {
       el.btnCloseSheet.addEventListener("click", closeMenu);
     }
@@ -869,7 +1231,6 @@ function formatNumberShort(angka) {
       });
     }
 
-    // Tombol total di sheet
     if (el.btnAddTotal) {
       el.btnAddTotal.addEventListener("click", addToTotal);
     }
@@ -877,15 +1238,13 @@ function formatNumberShort(angka) {
       el.btnResetTotal.addEventListener("click", resetTotal);
     }
 
-    // Tombol ulang / back
     if (el.btnBack) {
       el.btnBack.addEventListener("click", (e) => {
         e.stopPropagation();
-        triggerScan();
+        forceScanAndSpeak();
       });
     }
 
-    // Keyboard Accessibility (Spasi = Scan, T = Total, M = Menu, D = Diagnostic)
     window.addEventListener("keydown", (e) => {
       if (e.code === "Space") {
         e.preventDefault();
@@ -906,9 +1265,8 @@ function formatNumberShort(angka) {
     await startCamera();
     await initTfjsModel();
 
-    // Salam pembuka suara
     setTimeout(() => {
-      speak("Rupiah Reader siap. Arahkan uang ke kamera lalu ketuk layar untuk memindai.");
+      speak("Rupiah Reader siap. Pemindaian otomatis aktif. Arahkan uang ke kamera.");
     }, 600);
   }
 
