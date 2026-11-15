@@ -26,11 +26,15 @@ const BANKNOTE_CLASSES = [
   { index: 6, code: "idr_100000", nominal: 100000, name: "Seratus Ribu Rupiah",   badge: "100.000", valClass: "val-100000", hero: "Soekarno & Mohammad Hatta",     color: "#e11d48" }
 ];
 
-// Ambang Batas Keyakinan Terkalibrasi (Berdasarkan Evaluasi Hold-out Test Set & Real Webcam)
+// Ambang Batas Keyakinan Terkalibrasi (Sesuai Standar Aksesibilitas Tunanetra & Webcam Nyata)
 const THRESHOLDS = {
-  CONFIRMED: 0.40,    // Confidence >= 40% -> Terkonfirmasi
-  UNCERTAIN: 0.28,    // 28% - 39% -> Ragu-ragu (arahkan kamera lebih dekat)
-  UNKNOWN: 0.28       // < 28% -> Objek tidak dikenali
+  CONFIRMED: 0.70,    // Minimal 70% confidence per frame
+  MARGIN: 0.25,       // Minimal 25% margin di atas peringkat kedua
+  UNCERTAIN: 0.45,    // 45% - 69% -> Ragu-ragu (minta posisikan ulang)
+  UNKNOWN: 0.45,      // < 45% -> Objek tidak dikenali
+  MIN_VOTES: 3,       // Minimal 3 dari 5 frame sepakat pada nominal yang sama
+  TOTAL_FRAMES: 5,    // Jumlah frame konsensus per scan
+  FRAME_DELAY_MS: 100 // Jeda antar sampling frame (ms)
 };
 
 // ---------------------------------------------------------------------------
@@ -404,7 +408,7 @@ function formatNumberShort(angka) {
 
     // 4. Decision State Machine Terkalibrasi
     let state = "CONFIRMED";
-    if (top.prob >= THRESHOLDS.CONFIRMED && margin >= 0.05) {
+    if (top.prob >= THRESHOLDS.CONFIRMED && margin >= THRESHOLDS.MARGIN) {
       state = "CONFIRMED";
     } else if (top.prob >= THRESHOLDS.UNCERTAIN) {
       state = "UNCERTAIN";
@@ -423,7 +427,8 @@ function formatNumberShort(angka) {
       ranked,
       latency,
       confidence: top.prob,
-      margin
+      margin,
+      rawProbs: probsArr
     };
   }
 
@@ -558,7 +563,7 @@ function formatNumberShort(angka) {
   }
 
   // -------------------------------------------------------------------------
-  // Alur Pemindaian Beranimasi Penuh (Match GIF Interaction)
+  // Alur Pemindaian Multi-Frame Consensus (Aman untuk Penyandang Tunanetra)
   // -------------------------------------------------------------------------
   async function triggerScan() {
     if (app.scanLock) return;
@@ -575,7 +580,7 @@ function formatNumberShort(angka) {
     
     el.bottomCard.className = "bottom-pill-card state-scanning";
     el.pillSubtitle.textContent = "Scanning...";
-    el.pillTitle.textContent = "Memindai uang kertas...";
+    el.pillTitle.textContent = "Memverifikasi konsensus uang...";
     getar(45);
 
     try {
@@ -585,20 +590,79 @@ function formatNumberShort(angka) {
         await initTfjsModel();
       }
 
-      // Jalankan inferensi deep learning di browser
-      const inferRes = await runInBrowserBanknoteInference();
+      // Kumpulkan 5 frame berturut-turut untuk voting multi-frame
+      const votes = {};
+      const voteClasses = {};
+      const classProbSums = new Array(BANKNOTE_CLASSES.length).fill(0);
+      let totalLatency = 0;
+      let lastRanked = null;
 
-      // Jeda minimum 400ms agar efek sweeping laser violet terlihat indah & natural
-      await new Promise((r) => setTimeout(r, 420));
+      for (let i = 0; i < THRESHOLDS.TOTAL_FRAMES; i++) {
+        const frameRes = await runInBrowserBanknoteInference();
+        if (frameRes && frameRes.rawProbs) {
+          totalLatency += frameRes.latency;
+          lastRanked = frameRes.ranked;
 
-      if (!inferRes || inferRes.state === "UNKNOWN") {
-        // STATE UNKNOWN
+          // Akumulasi probabilitas per kelas
+          frameRes.rawProbs.forEach((p, idx) => {
+            classProbSums[idx] += p / THRESHOLDS.TOTAL_FRAMES;
+          });
+
+          // Catat vote jika frame memiliki confidence tinggi & margin jelas
+          if (frameRes.topClass && frameRes.confidence >= THRESHOLDS.CONFIRMED && frameRes.margin >= THRESHOLDS.MARGIN) {
+            const nom = frameRes.topClass.nominal;
+            votes[nom] = (votes[nom] || 0) + 1;
+            voteClasses[nom] = frameRes.topClass;
+          }
+        }
+
+        if (i < THRESHOLDS.TOTAL_FRAMES - 1) {
+          await new Promise((r) => setTimeout(r, THRESHOLDS.FRAME_DELAY_MS));
+        }
+      }
+
+      // Hitung ranking rata-rata dari seluruh frame
+      const avgRanked = classProbSums
+        .map((prob, idx) => ({ ...BANKNOTE_CLASSES[idx], prob }))
+        .sort((a, b) => b.prob - a.prob);
+
+      const avgTop = avgRanked[0];
+      const avgSecond = avgRanked[1];
+      const avgMargin = avgTop.prob - avgSecond.prob;
+      const avgLatency = Math.round(totalLatency / THRESHOLDS.TOTAL_FRAMES);
+
+      // Urutkan perolehan suara (voting)
+      const sortedVotes = Object.entries(votes).sort((a, b) => b[1] - a[1]);
+      const [votedNominalStr, voteCount] = sortedVotes[0] || [null, 0];
+      const votedNominal = votedNominalStr ? parseInt(votedNominalStr, 10) : null;
+
+      // Evaluasi Keputusan Akhir:
+      // CONFIRMED HANYA JIKA konsisten multi-frame (minimal 3 dari 5 frame sepakat ATAU
+      // probabilitas rata-rata multi-frame sangat meyakinkan >= 75% dengan margin >= 30%)
+      const isConsistentVote = votedNominal && voteCount >= THRESHOLDS.MIN_VOTES && (votedNominal === avgTop.nominal);
+      const isStrongEnsemble = avgTop.prob >= 0.75 && avgMargin >= 0.30;
+
+      let finalState = "UNKNOWN";
+      let confirmedClass = null;
+
+      if (isConsistentVote || isStrongEnsemble) {
+        finalState = "CONFIRMED";
+        confirmedClass = voteClasses[votedNominal] || avgTop;
+      } else if (avgTop.prob >= THRESHOLDS.UNCERTAIN || voteCount >= 1) {
+        finalState = "UNCERTAIN";
+      } else {
+        finalState = "UNKNOWN";
+      }
+
+      updateDiagnosticPanel(finalState, confirmedClass || avgTop, avgRanked.slice(0, 3), avgLatency);
+
+      if (finalState === "UNKNOWN") {
         document.body.classList.remove("state-scanning");
         el.bottomCard.className = "bottom-pill-card state-idle";
         el.pillSubtitle.textContent = "Tidak Terdeteksi";
         el.pillTitle.textContent = "Arahkan Uang ke Kamera";
         getar([100, 50, 100]);
-        speak("Uang tidak terdeteksi. Silakan arahkan uang tepat di depan kamera lalu ketuk layar lagi.");
+        speak("Uang tidak terdeteksi. Silakan posisikan seluruh uang kertas di dalam kotak bidik lalu ketuk layar lagi.");
 
         app.resetCardTimer = setTimeout(() => {
           el.pillSubtitle.textContent = "Scanning...";
@@ -607,14 +671,13 @@ function formatNumberShort(angka) {
         return;
       }
 
-      if (inferRes.state === "UNCERTAIN") {
-        // STATE UNCERTAIN
+      if (finalState === "UNCERTAIN") {
         document.body.classList.remove("state-scanning");
         el.bottomCard.className = "bottom-pill-card state-idle";
         el.pillSubtitle.textContent = "Kurang Jelas";
-        el.pillTitle.textContent = "Dekatkan Uang ke Kamera";
+        el.pillTitle.textContent = "Luruskan Uang di Kotak";
         getar([60, 40, 60]);
-        speak("Uang kurang jelas. Mohon luruskan atau dekatkan uang ke kamera.");
+        speak("Uang belum terbaca jelas. Mohon luruskan dan masukkan seluruh uang ke dalam kotak lalu ketuk layar lagi.");
 
         app.resetCardTimer = setTimeout(() => {
           el.pillSubtitle.textContent = "Scanning...";
@@ -625,12 +688,12 @@ function formatNumberShort(angka) {
 
       // STATE CONFIRMED:
       // Ambil objek kelas nominal yang terkonfirmasi (SINGLE SOURCE OF TRUTH)
-      const selected = inferRes.topClass;
+      const selected = confirmedClass;
 
       const res = {
         type: "banknote",
         nominal: selected.nominal,
-        confidence: inferRes.confidence,
+        confidence: avgTop.prob,
         speechText: nominalToSpeech(selected.nominal),
         displayText: formatRupiah(selected.nominal),
         badgeText: selected.badge,
