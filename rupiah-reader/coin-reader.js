@@ -26,11 +26,22 @@ const COIN_CONFIG = {
   SPEAK_COOLDOWN_MS: 3500,
 };
 
+const COIN_CLASSES = ['100', '200', '500', '1000', 'sisi_garuda'];
+
+const COIN_PRETTY_NOMINAL = {
+  "100": "Rp 100",
+  "200": "Rp 200",
+  "500": "Rp 500",
+  "1000": "Rp 1.000",
+  "sisi_garuda": "Sisi Garuda / Pahlawan",
+};
+
 const COIN_SPOKEN = {
   "100": "Seratus rupiah",
   "200": "Dua ratus rupiah",
   "500": "Lima ratus rupiah",
   "1000": "Seribu rupiah",
+  "sisi_garuda": "Sisi gambar Garuda atau Pahlawan",
 };
 
 const COIN_MSG = {
@@ -155,10 +166,49 @@ class CoinSessionReader {
   grabFrame() {
     const vw = this.video.videoWidth, vh = this.video.videoHeight;
     if (!vw || !vh) return Promise.resolve(null);
-    const k = Math.min(1, COIN_CONFIG.MAX_SIDE / Math.max(vw, vh));
-    this.canvas.width = Math.round(vw * k);
-    this.canvas.height = Math.round(vh * k);
-    this.canvas.getContext("2d").drawImage(this.video, 0, 0, this.canvas.width, this.canvas.height);
+
+    // 1. Ambil koordinat crop persis sesuai kotak bidik (viewfinder) UI jika ada
+    const vfEl = document.getElementById("viewfinder");
+    let sx = 0, sy = 0, sw = vw, sh = vh;
+    if (vfEl && this.video.getBoundingClientRect) {
+      const vRect = this.video.getBoundingClientRect();
+      const vfRect = vfEl.getBoundingClientRect();
+      const scale = Math.max(vRect.width / vw, vRect.height / vh);
+      const renderedW = vw * scale;
+      const renderedH = vh * scale;
+      const renderedLeft = vRect.left + (vRect.width - renderedW) / 2;
+      const renderedTop = vRect.top + (vRect.height - renderedH) / 2;
+
+      const isMirrored = document.body.classList.contains("cam-user");
+      const screenLeft = isMirrored
+        ? renderedW - (vfRect.right - renderedLeft)
+        : (vfRect.left - renderedLeft);
+      const screenTop = vfRect.top - renderedTop;
+
+      sx = Math.max(0, Math.min(vw - 1, Math.round(screenLeft / scale)));
+      sy = Math.max(0, Math.min(vh - 1, Math.round(screenTop / scale)));
+      sw = Math.max(1, Math.min(vw - sx, Math.round(vfRect.width / scale)));
+      sh = Math.max(1, Math.min(vh - sy, Math.round(vfRect.height / scale)));
+    }
+
+    // 2. Mode 'pad' (Letterbox dengan padding hitam rgb(0,0,0) ke ukuran target 224x224)
+    const targetSize = 224;
+    this.canvas.width = targetSize;
+    this.canvas.height = targetSize;
+    const ctx = this.canvas.getContext("2d", { willReadFrequently: true });
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(0, 0, targetSize, targetSize);
+
+    const containScale = Math.min(targetSize / sw, targetSize / sh);
+    const destW = Math.max(1, Math.round(sw * containScale));
+    const destH = Math.max(1, Math.round(sh * containScale));
+    const destX = Math.round((targetSize - destW) / 2);
+    const destY = Math.round((targetSize - destH) / 2);
+
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(this.video, sx, sy, sw, sh, destX, destY, destW, destH);
+
     return new Promise((resolve) => this.canvas.toBlob(resolve, "image/jpeg", COIN_CONFIG.JPEG_QUALITY));
   }
 
@@ -182,11 +232,12 @@ class CoinSessionReader {
     if (this.onStatus) this.onStatus({ ...res, frameCount: this.frameCount });
     switch (res.status) {
       case "jawab": {
-        const nominalStr = String(res.label || res.decision);
-        const text = COIN_SPOKEN[nominalStr] || `Rp ${nominalStr}`;
+        const nominalStr = String(res.label || res.decision || res.predicted_nominal || "");
+        const displayText = COIN_PRETTY_NOMINAL[nominalStr] || `Rp ${nominalStr}`;
+        const spokenText = COIN_SPOKEN[nominalStr] || displayText;
         if (navigator.vibrate) navigator.vibrate([120]);
-        this.onResult({ nominal: parseInt(nominalStr, 10), text });
-        this.finish("jawab", text, res);
+        this.onResult({ nominal: parseInt(nominalStr, 10) || nominalStr, text: displayText, spoken: spokenText });
+        this.finish("jawab", spokenText, res);
         return true;
       }
       case "menyerah":

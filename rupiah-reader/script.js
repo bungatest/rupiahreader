@@ -279,31 +279,92 @@ function formatNumberShort(angka) {
   }
 
   // -------------------------------------------------------------------------
-  // Preprocessing Citra Identik dengan Fase Training
+  // Perhitungan Koordinat Crop Presisi dari Kotak Viewfinder UI
+  // -------------------------------------------------------------------------
+  function getViewfinderCropCoords(videoEl, viewfinderEl) {
+    const vw = videoEl.videoWidth;
+    const vh = videoEl.videoHeight;
+    if (!vw || !vh) {
+      return { sx: 0, sy: 0, sw: 224, sh: 224 };
+    }
+
+    // Koordinat bounding box tampilan video & viewfinder di layar CSS
+    const vRect = videoEl.getBoundingClientRect();
+    const vfRect = (viewfinderEl || el.viewfinder).getBoundingClientRect();
+
+    // Perhitungan dimensi asli render video dengan CSS object-fit: cover
+    const scale = Math.max(vRect.width / vw, vRect.height / vh);
+    const renderedW = vw * scale;
+    const renderedH = vh * scale;
+    const renderedLeft = vRect.left + (vRect.width - renderedW) / 2;
+    const renderedTop = vRect.top + (vRect.height - renderedH) / 2;
+
+    // Deteksi mirroring kamera depan / webcam (CSS scaleX(-1))
+    const isMirrored = document.body.classList.contains("cam-user") ||
+      (app && app.currentFacingMode === "user");
+
+    const screenLeft = isMirrored
+      ? renderedW - (vfRect.right - renderedLeft)
+      : (vfRect.left - renderedLeft);
+    const screenTop = vfRect.top - renderedTop;
+
+    // Konversi koordinat layar ke koordinat piksel asli video
+    const sxRaw = screenLeft / scale;
+    const syRaw = screenTop / scale;
+    const swRaw = vfRect.width / scale;
+    const shRaw = vfRect.height / scale;
+
+    // Clamp ke batas aman frame video asli
+    const sx = Math.max(0, Math.min(vw - 1, Math.round(sxRaw)));
+    const sy = Math.max(0, Math.min(vh - 1, Math.round(syRaw)));
+    const sw = Math.max(1, Math.min(vw - sx, Math.round(swRaw)));
+    const sh = Math.max(1, Math.min(vh - sy, Math.round(shRaw)));
+
+    return { sx, sy, sw, sh };
+  }
+
+  // -------------------------------------------------------------------------
+  // Preprocessing Citra Identik dengan Fase Training (Mode 'pad' 224x224 RGB)
   // -------------------------------------------------------------------------
   function extractTensorFromCrop(videoEl, sx, sy, sw, sh) {
     return tf.tidy(() => {
-      // Buat canvas temporary untuk cropping presisi tinggi
+      // 1. Kanvas target 224x224 dengan latar belakang hitam rgb(0, 0, 0)
       const cropCanvas = document.createElement("canvas");
       cropCanvas.width = 224;
       cropCanvas.height = 224;
       const ctx = cropCanvas.getContext("2d", { willReadFrequently: true });
-      
-      // Draw image dengan crop dan resize lanczos/bilinear
-      ctx.drawImage(videoEl, sx, sy, sw, sh, 0, 0, 224, 224);
 
-      // Konversi pixel ke tensor float32 normalisasi [0.0, 1.0]
+      // Isi kanvas dengan warna hitam pekat rgb(0, 0, 0) untuk letterbox padding
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(0, 0, 224, 224);
+
+      // 2. Mode 'pad' (ImageOps.contain): jaga aspect ratio asli
+      const containScale = Math.min(224 / sw, 224 / sh);
+      const destW = Math.max(1, Math.round(sw * containScale));
+      const destH = Math.max(1, Math.round(sh * containScale));
+      const destX = Math.round((224 - destW) / 2);
+      const destY = Math.round((224 - destH) / 2);
+
+      // Kualitas rendering tinggi (bilinear/bicubic smoothing)
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+
+      // Gambar area crop viewfinder ke bagian tengah kanvas berlatar hitam
+      ctx.drawImage(videoEl, sx, sy, sw, sh, destX, destY, destW, destH);
+
+      // 3. Konversi ke Tensor float32 [1, 224, 224, 3] dalam rentang [0, 255] RGB
+      // CATATAN: TIDAK DIBAGI 255.0 (Mencegah double rescaling karena model sudah
+      // memiliki layer internal Rescaling(1./255))
       const tensor = tf.browser.fromPixels(cropCanvas)
         .toFloat()
-        .div(255.0)
-        .expandDims(0); // [1, 224, 224, 3]
+        .expandDims(0); // Shape [1, 224, 224, 3], Nilai piksel [0, 255]
 
       return tensor;
     });
   }
 
   // -------------------------------------------------------------------------
-  // Inferensi Multi-Scale Spatial Ensembling (Viewfinder + Full Frame)
+  // Inferensi Kamera: Fokus Penuh Area Kotak Bidik (Viewfinder)
   // -------------------------------------------------------------------------
   async function runInBrowserBanknoteInference() {
     const v = el.video;
@@ -312,38 +373,28 @@ function formatNumberShort(angka) {
     }
 
     const t0 = performance.now();
-    const vw = v.videoWidth;
-    const vh = v.videoHeight;
 
-    // 1. Crop Area Viewfinder (Tengah Vertikal 65% x 70%)
-    const cropW = Math.round(vw * 0.65);
-    const cropH = Math.round(vh * 0.70);
-    const startX = Math.round((vw - cropW) / 2);
-    const startY = Math.round((vh - cropH) / 2);
+    // 1. Ambil koordinat crop persis sesuai kotak bidik (viewfinder) di UI
+    const { sx, sy, sw, sh } = getViewfinderCropCoords(v, el.viewfinder);
 
-    const tensorCrop = extractTensorFromCrop(v, startX, startY, cropW, cropH);
-    const tensorFull = extractTensorFromCrop(v, 0, 0, vw, vh);
+    // 2. Ekstrak tensor dengan resize mode 'pad' (224x224 dengan padding hitam rgb(0,0,0))
+    // HANYA meng-crop area di dalam kotak bidik (HAPUS tensorFull dan spatial ensembling
+    // agar warna pakaian/latar belakang di luar kotak tidak mengacaukan prediksi)
+    const tensorCrop = extractTensorFromCrop(v, sx, sy, sw, sh);
 
-    let probsCropArr, probsFullArr;
+    let probsArr;
     try {
-      const predCrop = app.tfModel.predict(tensorCrop);
-      const predFull = app.tfModel.predict(tensorFull);
-
-      probsCropArr = Array.from(await predCrop.data());
-      probsFullArr = Array.from(await predFull.data());
+      const pred = app.tfModel.predict(tensorCrop);
+      probsArr = Array.from(await pred.data());
     } finally {
       tensorCrop.dispose();
-      tensorFull.dispose();
     }
 
     const latency = Math.round(performance.now() - t0);
     app.lastLatencyMs = latency;
 
-    // 2. Spatial Ensemble: 70% Viewfinder Target, 30% Full Frame Context
-    const combinedProbs = probsCropArr.map((p, idx) => 0.70 * p + 0.30 * probsFullArr[idx]);
-
     // 3. Cari Argmax (Top Predicted Class) & Ranking Top-3
-    const ranked = combinedProbs
+    const ranked = probsArr
       .map((prob, idx) => ({ ...BANKNOTE_CLASSES[idx], prob }))
       .sort((a, b) => b.prob - a.prob);
 
