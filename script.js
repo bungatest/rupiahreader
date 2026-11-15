@@ -2,7 +2,7 @@
   "use strict";
 
   /*
-   * Rupiah Reader – script.js (v9.2 Blind-Accessible Autonomous Scanner & MLOps Edition)
+   * Rupiah Reader – script.js (v10.0 Multi-Crop Full-Frame � No Viewfinder Dependency)
    * 
    * Penggerak antarmuka modern & inferensi AI in-browser via TensorFlow.js (WebGL GPU).
    * - Seluruh area kamera adalah area deteksi (Bebas ketergantungan pada crop viewfinder statis).
@@ -620,8 +620,11 @@
   }
 
   // -------------------------------------------------------------------------
-  // Inferensi Multi-Crop Terkalibrasi (Candidate Crop + Viewfinder Target Crop)
+  // Inferensi Multi-Crop v10.0 (Full-Frame + Grid 2×2 — TANPA viewfinder)
   // -------------------------------------------------------------------------
+  // Strategi: jalankan beberapa crop berbeda, pilih yang punya score tertinggi.
+  // Semua crop diproses dengan mode 'pad' (letterbox hitam) persis seperti training.
+  // TIDAK ADA crop dari viewfinder — seluruh frame kamera adalah area deteksi.
   async function predictBanknoteFrame(videoEl) {
     const vw = videoEl.videoWidth;
     const vh = videoEl.videoHeight;
@@ -630,74 +633,76 @@
     const t0 = performance.now();
     const isFrontCam = document.body.classList.contains("cam-user") || (app.currentFacingMode === "user");
 
-    // 1. Lokalisasi wilayah uang kertas di area foreground
+    // 1. Lokalisasi ringan untuk info kualitas frame & bbox overlay di debug mode
     const loc = locateBanknoteCandidate(videoEl);
 
-    // 2. Ekstrak tensor kandidat hasil lokalisasi dengan koreksi mirroring
-    const { tensor: tensorCand, canvas: canvasCand } = extractTensorAndCanvas(
-      videoEl, loc.sx, loc.sy, loc.sw, loc.sh, isFrontCam
-    );
+    // 2. Susun daftar crop: full-frame + grid 2×2 (overlapping 20%)
+    //    Setiap crop ditentukan sebagai (sx, sy, sw, sh) dalam koordinat piksel video asli.
+    const cropList = [];
 
-    let probsCand;
-    try {
-      const predCand = app.tfModel.predict(tensorCand);
-      probsCand = Array.from(await predCand.data());
-    } finally {
-      tensorCand.dispose();
+    // Crop 0: Full-Frame — persis input yang diterima model saat training (foto uang landscape utuh)
+    cropList.push({ id: "full", sx: 0, sy: 0, sw: vw, sh: vh });
+
+    // Crop 1–4: Grid 2×2 overlapping 20% (60% lebar & tinggi per tile)
+    //   Ini memastikan uang yang ada di sudut manapun tetap terwakili utuh dalam setidaknya 1 crop.
+    const tileW = Math.round(vw * 0.60);
+    const tileH = Math.round(vh * 0.60);
+    const stepX = Math.round(vw * 0.40); // 40% step → 20% overlap
+    const stepY = Math.round(vh * 0.40);
+    for (let gy = 0; gy < 2; gy++) {
+      for (let gx = 0; gx < 2; gx++) {
+        const sx = Math.min(gx * stepX, vw - tileW);
+        const sy = Math.min(gy * stepY, vh - tileH);
+        cropList.push({ id: `g${gy}${gx}`, sx, sy, sw: tileW, sh: tileH });
+      }
     }
 
-    const rankedCand = probsCand
-      .map((prob, idx) => ({ ...BANKNOTE_CLASSES[idx], prob }))
-      .sort((a, b) => b.prob - a.prob);
+    // Crop 5: Area lokalisasi (hanya jika coverage wajar: tidak terlalu luas dan tidak terlalu kecil)
+    if (loc.coverageRatio >= 0.04 && loc.coverageRatio <= 0.65 && loc.status === "OK") {
+      cropList.push({ id: "loc", sx: loc.sx, sy: loc.sy, sw: loc.sw, sh: loc.sh });
+    }
 
-    const topCand = rankedCand[0];
-    const secondCand = rankedCand[1];
-    const marginCand = topCand.prob - secondCand.prob;
+    // 3. Jalankan semua crop melalui model, kumpulkan skor
+    let bestResult = null;
+    let bestScore = -1;
 
-    let chosenResult = {
-      source: "candidate",
-      top: topCand,
-      second: secondCand,
-      margin: marginCand,
-      ranked: rankedCand,
-      rawProbs: probsCand,
-      canvas: canvasCand
-    };
-
-    // 3. Evaluasi Kotak Viewfinder (Jika kandidat belum mantap >= 70%)
-    // Viewfinder mengisolasi area bidik 2.1:1 di tengah secara bersih tanpa background luar
-    if (topCand.prob < 0.70) {
-      const vfCoords = getViewfinderCropCoords(videoEl, el.viewfinder);
-      const { tensor: tensorVf, canvas: canvasVf } = extractTensorAndCanvas(
-        videoEl, vfCoords.sx, vfCoords.sy, vfCoords.sw, vfCoords.sh, isFrontCam
+    // Gunakan satu canvas yang sudah ada (extractTensorAndCanvas memakai preprocessCanvas singleton)
+    // Proses satu per satu untuk menghindari race condition pada canvas bersama.
+    for (const crop of cropList) {
+      const { tensor, canvas } = extractTensorAndCanvas(
+        videoEl, crop.sx, crop.sy, crop.sw, crop.sh, isFrontCam
       );
 
-      let probsVf;
+      let probs;
       try {
-        const predVf = app.tfModel.predict(tensorVf);
-        probsVf = Array.from(await predVf.data());
+        const pred = app.tfModel.predict(tensor);
+        probs = Array.from(await pred.data());
+        pred.dispose();
       } finally {
-        tensorVf.dispose();
+        tensor.dispose();
       }
 
-      const rankedVf = probsVf
+      const ranked = probs
         .map((prob, idx) => ({ ...BANKNOTE_CLASSES[idx], prob }))
         .sort((a, b) => b.prob - a.prob);
 
-      const topVf = rankedVf[0];
-      const secondVf = rankedVf[1];
-      const marginVf = topVf.prob - secondVf.prob;
+      const top = ranked[0];
+      const second = ranked[1];
+      const margin = top.prob - second.prob;
 
-      // Pilih hasil dengan confidence tertinggi & margin paling tegas
-      if (topVf.prob > topCand.prob && marginVf >= (marginCand * 0.85)) {
-        chosenResult = {
-          source: "viewfinder",
-          top: topVf,
-          second: secondVf,
-          margin: marginVf,
-          ranked: rankedVf,
-          rawProbs: probsVf,
-          canvas: canvasVf
+      // Score = prob × (1 + margin): menggabungkan confidence dan ketegasan prediksi
+      const score = top.prob * (1 + margin);
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestResult = {
+          source: crop.id,
+          top,
+          second,
+          margin,
+          ranked,
+          rawProbs: probs,
+          canvas   // canvas dari extractTensorAndCanvas adalah preprocessCanvas singleton
         };
       }
     }
@@ -707,7 +712,7 @@
 
     return {
       loc,
-      chosen: chosenResult,
+      chosen: bestResult,
       latency
     };
   }
