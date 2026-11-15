@@ -325,7 +325,7 @@
       if (el.chipText) el.chipText.textContent = `AI Ready (${app.backendName})`;
       if (el.sheetGpuVal) el.sheetGpuVal.textContent = `GPU WebGL Aktif (MobileNetV2)`;
       if (el.diagBackend) el.diagBackend.textContent = app.backendName;
-      if (el.diagModel) el.diagModel.textContent = "MobileNetV2 v2.1.0";
+      if (el.diagModel) el.diagModel.textContent = "MobileNetV2 v11.0 Production";
 
       // Jalankan loop pemindaian kontinu begitu model dan kamera siap
       startContinuousScanLoop();
@@ -662,6 +662,16 @@
     // Crop 5: Area lokalisasi (hanya jika coverage wajar: tidak terlalu luas dan tidak terlalu kecil)
     if (loc.coverageRatio >= 0.04 && loc.coverageRatio <= 0.65 && loc.status === "OK") {
       cropList.push({ id: "loc", sx: loc.sx, sy: loc.sy, sw: loc.sw, sh: loc.sh });
+    }
+
+    // Crop 6: Horizontal Center Crop (khusus saat layar dalam orientasi portrait / HP)
+    // Uang kertas yang dipegang melintang di depan layar portrait mendapat resolusi maksimal
+    if (vh > vw) {
+      const chH = Math.round(vh * 0.48);
+      const chW = Math.round(vw * 0.94);
+      const chX = Math.round((vw - chW) / 2);
+      const chY = Math.round((vh - chH) / 2);
+      cropList.push({ id: "center_h", sx: chX, sy: chY, sw: chW, sh: chH });
     }
 
     // 3. Jalankan semua crop melalui model, kumpulkan skor
