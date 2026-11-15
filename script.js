@@ -1011,7 +1011,9 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   // -------------------------------------------------------------------------
   async function startCamera(facingMode = "environment") {
     if (app.stream) {
-      app.stream.getTracks().forEach((t) => t.stop());
+      try {
+        app.stream.getTracks().forEach((t) => t.stop());
+      } catch (_) {}
       app.stream = null;
     }
 
@@ -1019,37 +1021,73 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const targetFacing = isMobile ? facingMode : "user";
     app.currentFacingMode = targetFacing;
 
-    const constraints = {
-      video: {
-        facingMode: { ideal: targetFacing },
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-      },
-      audio: false,
-    };
+    if (document.body) {
+      document.body.classList.toggle("cam-user", targetFacing === "user");
+    }
 
+    if (el.video) {
+      el.video.muted = true;
+      el.video.defaultMuted = true;
+      el.video.setAttribute("muted", "");
+      el.video.setAttribute("playsinline", "");
+      el.video.setAttribute("webkit-playsinline", "");
+    }
+
+    let stream = null;
+
+    // Tahap 1: Coba resolusi ideal 1280x720 dengan facingMode yang ditargetkan
     try {
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: targetFacing },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      });
+    } catch (err1) {
+      console.warn("Akses kamera tahap 1 (resolusi ideal) gagal, coba tahap 2:", err1);
+      // Tahap 2: Coba tanpa constraint resolusi kaku
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: targetFacing } },
+          audio: false,
+        });
+      } catch (err2) {
+        console.warn("Akses kamera tahap 2 (facingMode) gagal, coba tahap 3 (generic video):", err2);
+        // Tahap 3: Fallback generic video: true
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+          });
+        } catch (err3) {
+          console.error("Semua percobaan akses kamera ditolak atau perangkat tidak ditemukan:", err3);
+          if (el.chipText) el.chipText.textContent = "Kamera Belum Aktif";
+          if (el.pillSubtitle) el.pillSubtitle.textContent = "Izin Kamera Dibutuhkan";
+          if (el.pillTitle) el.pillTitle.textContent = "Ketuk Layar untuk Aktifkan Kamera";
+          speak("Izin kamera belum aktif. Ketuk layar atau izinkan akses kamera di browser Anda.");
+          return;
+        }
+      }
+    }
+
+    if (stream && el.video) {
       app.stream = stream;
       el.video.srcObject = stream;
-      el.video.setAttribute("playsinline", "");
-      await el.video.play();
+      el.video.muted = true;
+
+      try {
+        await el.video.play();
+      } catch (playErr) {
+        console.warn("Autoplay dicegah browser, menunggu interaksi gestur pengguna:", playErr);
+      }
 
       if (el.sheetCamVal) {
         el.sheetCamVal.textContent = targetFacing === "user" ? "Kamera Depan / Webcam" : "Kamera Belakang";
       }
-    } catch (err) {
-      console.warn("Kamera ideal gagal, coba fallback generic video:", err);
-      try {
-        const streamFallback = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-        app.stream = streamFallback;
-        el.video.srcObject = streamFallback;
-        await el.video.play();
-        if (el.sheetCamVal) el.sheetCamVal.textContent = "Kamera Default";
-      } catch (err2) {
-        console.error("Gagal menyalakan kamera:", err2);
-        if (el.chipText) el.chipText.textContent = "Camera Blocked";
-        speak("Izin kamera belum aktif. Berikan izin kamera di browser Anda.");
+      if (el.chipText && !app.modelReady) {
+        el.chipText.textContent = "Camera Ready";
       }
     }
   }
@@ -1258,12 +1296,30 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   // -------------------------------------------------------------------------
-  // Bootstrapping Aplikasi
+  // Bootstrapping Aplikasi (Non-blocking & Auto-recovery)
   // -------------------------------------------------------------------------
   async function bootstrap() {
     attachEventListeners();
-    await startCamera();
-    await initTfjsModel();
+
+    // Jalankan inisialisasi AI model dan kamera secara paralel (non-blocking)
+    initTfjsModel().catch((err) => console.warn("[MLOps] Error memuat model AI:", err));
+    startCamera().catch((err) => console.warn("[MLOps] Error inisialisasi kamera:", err));
+
+    // Fallback interaksi: jika browser memerlukan klik/sentuhan user untuk memulai kamera / video.play()
+    const onUserInteraction = async () => {
+      if (!app.stream) {
+        console.log("[MLOps] Gestur pengguna diterima, mencoba mengaktifkan kamera...");
+        await startCamera(app.currentFacingMode);
+      } else if (el.video && el.video.paused) {
+        try {
+          el.video.muted = true;
+          await el.video.play();
+        } catch (_) {}
+      }
+    };
+
+    document.addEventListener("pointerdown", onUserInteraction, { passive: true });
+    document.addEventListener("click", onUserInteraction, { passive: true });
 
     setTimeout(() => {
       speak("Rupiah Reader siap. Pemindaian otomatis aktif. Arahkan uang ke kamera.");
