@@ -290,11 +290,11 @@
 
       console.log(`[MLOps] TF.js Backend aktif: ${tf.getBackend()}`);
 
-      // Lokasi Model Artifacts (dengan cache-buster v10.1 agar browser selalu memuat bobot terbaru)
+      // Lokasi Model Artifacts
       const modelLocations = [
-        "./model_tfjs/model.json?v=10.1",
-        "model_tfjs/model.json?v=10.1",
-        "../model_tfjs/model.json?v=10.1"
+        "./model_tfjs/model.json",
+        "model_tfjs/model.json",
+        "../model_tfjs/model.json"
       ];
 
       let loaded = null;
