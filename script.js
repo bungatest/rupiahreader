@@ -2,7 +2,7 @@
   "use strict";
 
   /*
-   * Rupiah Reader – script.js (v10.0 Multi-Crop Full-Frame � No Viewfinder Dependency)
+   * Rupiah Reader – script.js (v10.1 Multi-Crop Full-Frame � No Viewfinder Dependency)
    * 
    * Penggerak antarmuka modern & inferensi AI in-browser via TensorFlow.js (WebGL GPU).
    * - Seluruh area kamera adalah area deteksi (Bebas ketergantungan pada crop viewfinder statis).
@@ -290,11 +290,11 @@
 
       console.log(`[MLOps] TF.js Backend aktif: ${tf.getBackend()}`);
 
-      // Lokasi Model Artifacts
+      // Lokasi Model Artifacts (dengan cache-buster v10.1 agar browser selalu memuat bobot terbaru)
       const modelLocations = [
-        "./model_tfjs/model.json",
-        "model_tfjs/model.json",
-        "../model_tfjs/model.json"
+        "./model_tfjs/model.json?v=10.1",
+        "model_tfjs/model.json?v=10.1",
+        "../model_tfjs/model.json?v=10.1"
       ];
 
       let loaded = null;
@@ -620,7 +620,7 @@
   }
 
   // -------------------------------------------------------------------------
-  // Inferensi Multi-Crop v10.0 (Full-Frame + Grid 2×2 — TANPA viewfinder)
+  // Inferensi Multi-Crop v10.1 (Full-Frame + Grid 2×2 — TANPA viewfinder)
   // -------------------------------------------------------------------------
   // Strategi: jalankan beberapa crop berbeda, pilih yang punya score tertinggi.
   // Semua crop diproses dengan mode 'pad' (letterbox hitam) persis seperti training.

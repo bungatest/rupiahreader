@@ -42,3 +42,7 @@ rupiah-reader-frontend/
 .idea/
 .DS_Store
 Thumbs.db
+
+rupiah_synthetic_dataset/
+model_robust_webcam.keras
+
