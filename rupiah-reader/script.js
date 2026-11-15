@@ -303,7 +303,9 @@
           console.log(`[MLOps] Mencoba memuat model dari: ${loc}`);
           loaded = await tf.loadLayersModel(loc);
           if (loaded) break;
-        } catch (_) {}
+        } catch (err) {
+          console.warn(`[MLOps] Gagal memuat dari ${loc}:`, err);
+        }
       }
 
       if (!loaded) {
@@ -1369,7 +1371,9 @@
         try {
           el.video.muted = true;
           await el.video.play();
-        } catch (_) {}
+        } catch (err) {
+          console.warn(`[MLOps] Gagal memuat dari ${loc}:`, err);
+        }
       }
     };
 
