@@ -30,17 +30,17 @@
   ];
   window.BANKNOTE_CLASSES = BANKNOTE_CLASSES;
 
-  // Ambang Batas Keyakinan Terkalibrasi (Sesuai Standar Aksesibilitas Tunanetra & Kondisi Kamera Riil)
+  // Ambang Batas Keyakinan Terkalibrasi (Sangat Responsif & Bebas Lockup)
   const THRESHOLDS = {
-    CONFIRMED: 0.65,             // Minimal 65% rata-rata confidence untuk konfirmasi
-    MARGIN: 0.20,                // Minimal 20% margin di atas peringkat kedua
-    UNCERTAIN: 0.40,             // Ambang batas keraguan (ambigu)
-    UNKNOWN: 0.35,               // Di bawah 35% dianggap objek tak dikenal / frame kosong
-    WINDOW_SIZE: 6,              // Buffer sliding window 6 frame terakhir
-    MIN_VOTES: 4,                // Minimal 4 dari 6 frame sepakat pada nominal yang sama
-    TARGET_FRAME_INTERVAL_MS: 160, // Target ~6 FPS untuk scanning kontinu tanpa membebani GPU/CPU
-    GUIDANCE_COOLDOWN_MS: 3800,  // Jeda minimal antar petunjuk suara (mencegah spam suara)
-    SPEECH_SAME_BILL_COOLDOWN_MS: 7000 // Jeda pengucapan ulang bila uang yang sama masih di depan kamera
+    CONFIRMED: 0.50,             // Minimal 50% rata-rata confidence untuk konfirmasi
+    MARGIN: 0.10,                // Minimal 10% margin di atas peringkat kedua
+    UNCERTAIN: 0.35,             // Ambang batas keraguan (ambigu)
+    UNKNOWN: 0.30,               // Di bawah 30% dianggap objek tak dikenal / frame kosong
+    WINDOW_SIZE: 4,              // Buffer sliding window 4 frame terakhir (responsif ~500ms)
+    MIN_VOTES: 3,                // 3 dari 4 frame sepakat untuk konfirmasi cepat
+    TARGET_FRAME_INTERVAL_MS: 150, // Target ~6-7 FPS untuk scanning kontinu
+    GUIDANCE_COOLDOWN_MS: 4000,  // Jeda minimal antar petunjuk suara (mencegah spam suara)
+    SPEECH_SAME_BILL_COOLDOWN_MS: 6000 // Jeda pengucapan ulang bila uang yang sama masih di depan kamera
   };
 
   // ---------------------------------------------------------------------------
@@ -302,7 +302,9 @@
       for (const loc of modelLocations) {
         try {
           console.log(`[MLOps] Mencoba memuat model dari: ${loc}`);
-          loaded = await tf.loadLayersModel(loc);
+          loaded = await tf.loadLayersModel(loc, {
+            requestInit: { cache: "no-store" }
+          });
           if (loaded) break;
         } catch (err) {
           console.warn(`[MLOps] Gagal memuat dari ${loc}:`, err);
@@ -899,14 +901,28 @@
           // Perbarui Debug Overlay
           renderDebugOverlay(loc, chosen, latency, app.currentFps);
 
-          // Evaluasi deteksi frame
+          const now = Date.now();
+          // 1. Kadaluwarsa vote lama: buang vote yang lebih lama dari 700ms (cegah lockup)
+          app.slidingWindow = app.slidingWindow.filter(item => (now - item.timestamp) < 700);
+
+          // 2. Deteksi pergantian uang secara instan:
+          // Jika frame saat ini mendeteksi nominal baru dengan probabilitas tinggi (>=0.50),
+          // bersihkan vote nominal sebelumnya agar langsung responsif tanpa terkunci nominal lama!
+          if (chosen && chosen.top && chosen.top.prob >= 0.50) {
+            if (app.lastConfirmedNominal && chosen.top.nominal !== app.lastConfirmedNominal) {
+              app.slidingWindow = app.slidingWindow.filter(item => item.nominal === chosen.top.nominal);
+              app.lastSpokenNominal = null;
+            }
+          }
+
+          // 3. Evaluasi deteksi frame
           if (chosen && chosen.top.prob >= THRESHOLDS.UNKNOWN) {
             app.slidingWindow.push({
               nominal: chosen.top.nominal,
               code: chosen.top.code,
               prob: chosen.top.prob,
               margin: chosen.margin,
-              timestamp: Date.now()
+              timestamp: now
             });
 
             if (app.slidingWindow.length > THRESHOLDS.WINDOW_SIZE) {
@@ -915,20 +931,27 @@
             app.consecutiveEmptyFrames = 0;
           } else {
             app.consecutiveEmptyFrames++;
-            // Jika uang disingkirkan dari depan kamera selama >= 6 frame berturut-turut (~1.2 detik),
-            // reset lastSpokenNominal agar nominal berikutnya (atau uang baru) dapat diucapkan kembali!
-            if (app.consecutiveEmptyFrames >= 6) {
+            if (app.consecutiveEmptyFrames >= 3) {
               app.lastSpokenNominal = null;
-              if (app.slidingWindow.length > 0) {
-                app.slidingWindow.shift();
+              app.lastConfirmedNominal = null;
+              app.slidingWindow = [];
+              // Reset bottom card ke idle jika uang disingkirkan
+              if (el.bottomCard && el.bottomCard.classList.contains("state-result")) {
+                el.bottomCard.className = "bottom-pill-card state-idle";
+                el.pillSubtitle.textContent = "Scanning...";
+                el.pillTitle.textContent = "Arahkan Uang ke Kamera";
+                if (el.banknoteThumb && el.thumbNumber) {
+                  el.banknoteThumb.className = "banknote-thumbnail val-scanning";
+                  el.thumbNumber.textContent = "...";
+                }
               }
             }
           }
 
           // -----------------------------------------------------------------
-          // Evaluasi Konsensus Multi-Frame (6 Frame Buffer)
+          // Evaluasi Konsensus Multi-Frame (Responsif & Akurat)
           // -----------------------------------------------------------------
-          if (app.slidingWindow.length >= 4) {
+          if (app.slidingWindow.length >= THRESHOLDS.MIN_VOTES) {
             const votes = {};
             for (const item of app.slidingWindow) {
               votes[item.nominal] = (votes[item.nominal] || 0) + 1;
@@ -953,6 +976,7 @@
 
               if (matchedClass) {
                 app.currentState = "CONFIRMED";
+                app.lastConfirmedNominal = matchedClass.nominal;
                 updateDiagnosticPanel("CONFIRMED", matchedClass, chosen.ranked.slice(0, 3), latency);
 
                 // CEGAH SPAM SUARA:
@@ -979,10 +1003,16 @@
                 }
               }
             } else {
-              // Belum tercapai konsensus
+              // Belum tercapai konsensus pasti, tampilkan live scanning feedback
               app.unconfirmedFramesCount++;
               app.currentState = (avgConf >= THRESHOLDS.UNCERTAIN) ? "UNCERTAIN" : "UNKNOWN";
               updateDiagnosticPanel(app.currentState, chosen.top, chosen.ranked.slice(0, 3), latency);
+
+              // Tampilkan candidate preview di card bawah agar user tahu AI aktif menganalisis
+              if (chosen && chosen.top && chosen.top.prob >= 0.40 && app.lastConfirmedNominal !== chosen.top.nominal) {
+                el.pillSubtitle.textContent = "Menganalisis uang...";
+                el.pillTitle.textContent = `${formatRupiah(chosen.top.nominal)}?`;
+              }
 
               // -------------------------------------------------------------
               // Panduan Suara Non-Spamming untuk Penyandang Tunanetra
