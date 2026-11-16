@@ -260,6 +260,7 @@
 
   function getar(pola) {
     try {
+      if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
       if (navigator.vibrate) navigator.vibrate(pola);
     } catch (_) {}
   }
