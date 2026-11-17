@@ -1073,286 +1073,213 @@
       app.currentFps = Math.round(1000 / Math.max(1, loopStart - app.lastFrameTimestamp));
       app.lastFrameTimestamp = loopStart;
 
-      // Jika video belum siap atau model belum termuat, tunggu
-      if (!el.video || !el.video.videoWidth || !app.modelReady || !app.tfModel) {
+      // Tunggu hingga video kamera dan setidaknya satu model siap
+      if (!el.video || !el.video.videoWidth || (!app.modelReady && !app.coinModelReady)) {
         await sleep(200);
         continue;
       }
 
-      // -------------------------------------------------------------
-      // CABANG MODE KOIN (Real-time WebGL Inference)
-      // -------------------------------------------------------------
-      if (app.currentMode === "coin") {
-        if (!app.coinModelReady || !app.tfCoinModel) {
-          await sleep(200);
-          continue;
-        }
-
-        try {
-          const coinData = await predictCoinFrame(el.video);
-          if (coinData) {
-            const { top, second, margin, latency } = coinData;
-            const now = Date.now();
-
-            // Expire votes > 700ms
-            app.slidingWindow = app.slidingWindow.filter(item => (now - item.timestamp) < 700);
-
-            if (top && top.prob >= 0.40) {
-              app.slidingWindow.push({
-                nominal: top.nominal,
-                code: top.code,
-                name: top.name,
-                prob: top.prob,
-                margin: margin,
-                timestamp: now
-              });
-
-              if (app.slidingWindow.length > 4) {
-                app.slidingWindow.shift();
-              }
-              app.consecutiveEmptyFrames = 0;
-            } else {
-              app.consecutiveEmptyFrames++;
-              if (app.consecutiveEmptyFrames >= 3) {
-                app.lastSpokenNominal = null;
-                app.lastConfirmedNominal = null;
-                app.slidingWindow = [];
-                if (el.bottomCard && el.bottomCard.classList.contains("state-result")) {
-                  el.bottomCard.className = "bottom-pill-card state-idle";
-                  el.pillSubtitle.textContent = "Scanning Koin...";
-                  el.pillTitle.textContent = "Arahkan Koin ke Kamera";
-                  if (el.banknoteThumb && el.thumbNumber) {
-                    el.banknoteThumb.className = "banknote-thumbnail val-scanning";
-                    el.thumbNumber.textContent = "🪙";
-                  }
-                }
-              }
-            }
-
-            // Hitung konsensus 2 frame berturut-turut
-            if (app.slidingWindow.length >= 2) {
-              const voteCounts = {};
-              const sumProb = {};
-              for (const vote of app.slidingWindow) {
-                voteCounts[vote.code] = (voteCounts[vote.code] || 0) + 1;
-                sumProb[vote.code] = (sumProb[vote.code] || 0) + vote.prob;
-              }
-
-              let winCode = null;
-              let maxVotes = 0;
-              for (const [code, count] of Object.entries(voteCounts)) {
-                if (count > maxVotes) {
-                  maxVotes = count;
-                  winCode = code;
-                }
-              }
-
-              const avgProb = sumProb[winCode] / maxVotes;
-              if (maxVotes >= 2 && avgProb >= 0.45) {
-                const winClass = COIN_CLASSES.find(c => c.code === winCode) || top;
-
-                if (winCode === "sisi_garuda") {
-                  if (el.bottomCard) {
-                    el.bottomCard.className = "bottom-pill-card state-result";
-                    el.pillSubtitle.textContent = "Sisi Gambar Garuda / Pahlawan";
-                    el.pillTitle.textContent = "Balik Koin untuk Membaca Nominal";
-                    if (el.banknoteThumb && el.thumbNumber) {
-                      el.banknoteThumb.className = "banknote-thumbnail val-coin-garuda";
-                      el.thumbNumber.textContent = "🦅";
-                    }
-                  }
-                  if (now - app.lastSpokenTimestamp > 4500) {
-                    app.lastSpokenTimestamp = now;
-                    getar([80, 50, 80]);
-                    speak("Sisi gambar Garuda atau Pahlawan, silakan balik koin untuk memastikan angka nominal.");
-                  }
-                } else {
-                  const nominal = winClass.nominal;
-                  app.lastConfirmedNominal = nominal;
-                  app.lastResult = { nominal, isCoin: true };
-
-                  if (el.bottomCard) {
-                    el.bottomCard.className = "bottom-pill-card state-result";
-                    el.pillSubtitle.textContent = "Hasil Deteksi Koin";
-                    el.pillTitle.textContent = `Rp ${nominal.toLocaleString("id-ID")}`;
-                    if (el.banknoteThumb && el.thumbNumber) {
-                      el.banknoteThumb.className = `banknote-thumbnail val-coin-${nominal}`;
-                      el.thumbNumber.textContent = winClass.badge;
-                    }
-                  }
-
-                  triggerSuccessBadge();
-
-                  if (now - app.lastSpokenTimestamp > THRESHOLDS.SPEECH_SAME_BILL_COOLDOWN_MS || app.lastSpokenNominal !== nominal) {
-                    app.lastSpokenNominal = nominal;
-                    app.lastSpokenTimestamp = now;
-                    getar([120]);
-                    speak(nominalToSpeech(nominal, true));
-                  }
-                }
-              }
-            }
-          }
-        } catch (err) {
-          console.warn("[MLOps] Error frame koin:", err);
-        }
-
-        const elapsed = performance.now() - loopStart;
-        const sleepTime = Math.max(10, THRESHOLDS.TARGET_FRAME_INTERVAL_MS - elapsed);
-        await sleep(sleepTime);
-        continue;
-      }
-
-
+      // =========================================================================
+      // INFERENSI ENSEMBLE PARALEL OTOMATIS (ZERO-TOUCH MULTI-MODAL RECOGNITION)
+      // Pengguna tunanetra TIDAK PERLU menekan tombol apa pun. Model secara mandiri
+      // mengevaluasi apakah objek adalah uang kertas atau uang logam dalam satu loop.
+      // =========================================================================
       try {
-        const frameData = await predictBanknoteFrame(el.video);
-        if (frameData) {
-          const { loc, chosen, latency } = frameData;
+        const [banknoteData, coinData] = await Promise.all([
+          app.modelReady ? predictBanknoteFrame(el.video) : Promise.resolve(null),
+          app.coinModelReady ? predictCoinFrame(el.video) : Promise.resolve(null)
+        ]);
 
-          // Perbarui Debug Overlay
-          renderDebugOverlay(loc, chosen, latency, app.currentFps);
+        const now = Date.now();
+        // Kadaluwarsa vote lama > 700ms (cegah voting lockup)
+        app.slidingWindow = app.slidingWindow.filter(item => (now - item.timestamp) < 700);
 
-          const now = Date.now();
-          // 1. Kadaluwarsa vote lama: buang vote yang lebih lama dari 700ms (cegah lockup)
-          app.slidingWindow = app.slidingWindow.filter(item => (now - item.timestamp) < 700);
+        // Ekstraksi kandidat teratas dari masing-masing model
+        const bTop = banknoteData?.chosen?.top;
+        const bMargin = banknoteData?.chosen?.margin || 0;
+        const bScore = bTop ? (bTop.prob + 0.45 * bMargin) : 0;
 
-          // 2. Deteksi pergantian uang secara instan:
-          // Jika frame saat ini mendeteksi nominal baru dengan probabilitas tinggi (>=0.50),
-          // bersihkan vote nominal sebelumnya agar langsung responsif tanpa terkunci nominal lama!
-          if (chosen && chosen.top && chosen.top.prob >= 0.50) {
-            if (app.lastConfirmedNominal && chosen.top.nominal !== app.lastConfirmedNominal) {
-              app.slidingWindow = app.slidingWindow.filter(item => item.nominal === chosen.top.nominal);
-              app.lastSpokenNominal = null;
-            }
+        const cTop = coinData?.top;
+        const cMargin = coinData?.margin || 0;
+        const cScore = cTop ? (cTop.prob + 0.45 * cMargin) : 0;
+
+        let frameCandidate = null;
+
+        // Aturan Arbitrasi AI Cerdas:
+        // 1. Sisi Garuda adalah ciri khas mutlak koin logam
+        if (cTop && cTop.code === "sisi_garuda" && cTop.prob >= 0.42) {
+          frameCandidate = { type: "coin", ...cTop, margin: cMargin, prob: cTop.prob };
+        }
+        // 2. Jika skor model koin signifikan lebih unggul
+        else if (cScore >= 0.45 && cScore > bScore) {
+          frameCandidate = { type: "coin", ...cTop, margin: cMargin, prob: cTop.prob };
+        }
+        // 3. Jika skor model uang kertas signifikan lebih unggul
+        else if (bScore >= 0.38 && bScore > cScore) {
+          frameCandidate = { type: "banknote", ...bTop, margin: bMargin, prob: bTop.prob };
+        }
+
+        // Tampilkan debug overlay jika aktif
+        if (banknoteData && banknoteData.loc && banknoteData.chosen) {
+          renderDebugOverlay(banknoteData.loc, banknoteData.chosen, banknoteData.latency, app.currentFps);
+        }
+
+        if (frameCandidate) {
+          // Deteksi pergantian uang secara instan
+          if (app.lastConfirmedNominal && frameCandidate.nominal !== app.lastConfirmedNominal) {
+            app.slidingWindow = app.slidingWindow.filter(item => item.nominal === frameCandidate.nominal && item.type === frameCandidate.type);
+            app.lastSpokenNominal = null;
           }
 
-          // 3. Evaluasi deteksi frame
-          if (chosen && chosen.top.prob >= THRESHOLDS.UNKNOWN) {
-            app.slidingWindow.push({
-              nominal: chosen.top.nominal,
-              code: chosen.top.code,
-              prob: chosen.top.prob,
-              margin: chosen.margin,
-              timestamp: now
-            });
+          app.slidingWindow.push({
+            type: frameCandidate.type,
+            nominal: frameCandidate.nominal,
+            code: frameCandidate.code,
+            name: frameCandidate.name,
+            badge: frameCandidate.badge,
+            color: frameCandidate.color,
+            hero: frameCandidate.hero,
+            prob: frameCandidate.prob,
+            timestamp: now
+          });
 
-            if (app.slidingWindow.length > THRESHOLDS.WINDOW_SIZE) {
-              app.slidingWindow.shift();
-            }
-            app.consecutiveEmptyFrames = 0;
+          if (app.slidingWindow.length > THRESHOLDS.WINDOW_SIZE) {
+            app.slidingWindow.shift();
+          }
+          app.consecutiveEmptyFrames = 0;
+
+          // Adaptasi bentuk viewfinder secara dinamis
+          if (frameCandidate.type === "coin") {
+            document.body.classList.add("mode-coin");
           } else {
-            app.consecutiveEmptyFrames++;
-            if (app.consecutiveEmptyFrames >= 3) {
-              app.lastSpokenNominal = null;
-              app.lastConfirmedNominal = null;
-              app.slidingWindow = [];
-              // Reset bottom card ke idle jika uang disingkirkan
-              if (el.bottomCard && el.bottomCard.classList.contains("state-result")) {
-                el.bottomCard.className = "bottom-pill-card state-idle";
-                el.pillSubtitle.textContent = "Scanning...";
-                el.pillTitle.textContent = "Arahkan Uang ke Kamera";
-                if (el.banknoteThumb && el.thumbNumber) {
-                  el.banknoteThumb.className = "banknote-thumbnail val-scanning";
-                  el.thumbNumber.textContent = "...";
-                }
-              }
-            }
+            document.body.classList.remove("mode-coin");
           }
+        } else {
+          app.consecutiveEmptyFrames++;
+          if (app.consecutiveEmptyFrames >= 3) {
+            app.lastSpokenNominal = null;
+            app.lastConfirmedNominal = null;
+            app.slidingWindow = [];
+            document.body.classList.remove("mode-coin");
 
-          // -----------------------------------------------------------------
-          // Evaluasi Konsensus Multi-Frame (Responsif & Akurat)
-          // -----------------------------------------------------------------
-          if (app.slidingWindow.length >= THRESHOLDS.MIN_VOTES) {
-            const votes = {};
-            for (const item of app.slidingWindow) {
-              votes[item.nominal] = (votes[item.nominal] || 0) + 1;
-            }
-
-            const sortedVotes = Object.entries(votes).sort((a, b) => b[1] - a[1]);
-            const [votedNomStr, voteCount] = sortedVotes[0] || [null, 0];
-            const votedNominal = votedNomStr ? parseInt(votedNomStr, 10) : null;
-
-            const winFrames = app.slidingWindow.filter(f => f.nominal === votedNominal);
-            const avgConf = winFrames.reduce((acc, f) => acc + f.prob, 0) / winFrames.length;
-            const avgMargin = winFrames.reduce((acc, f) => acc + f.margin, 0) / winFrames.length;
-
-            const isConfirmed = votedNominal &&
-              (voteCount >= THRESHOLDS.MIN_VOTES) &&
-              (avgConf >= THRESHOLDS.CONFIRMED) &&
-              (avgMargin >= THRESHOLDS.MARGIN);
-
-            if (isConfirmed) {
-              app.unconfirmedFramesCount = 0;
-              const matchedClass = BANKNOTE_CLASSES.find(c => c.nominal === votedNominal);
-
-              if (matchedClass) {
-                app.currentState = "CONFIRMED";
-                app.lastConfirmedNominal = matchedClass.nominal;
-                updateDiagnosticPanel("CONFIRMED", matchedClass, chosen.ranked.slice(0, 3), latency);
-
-                // CEGAH SPAM SUARA:
-                // Ucapkan SEKALI saja untuk setiap uang yang dihadirkan.
-                // Jangan ulangi ucapan jika uang yang sama masih di depan kamera!
-                if (app.lastSpokenNominal !== matchedClass.nominal) {
-                  app.lastSpokenNominal = matchedClass.nominal;
-                  app.lastSpokenTimestamp = Date.now();
-                  app.lastResult = {
-                    ...matchedClass,
-                    type: "banknote",
-                    confidence: avgConf,
-                    displayText: formatRupiah(matchedClass.nominal),
-                    speechText: nominalToSpeech(matchedClass.nominal)
-                  };
-
-                  getar([80, 40, 80]);
-                  showSuccessBloom();
-                  speak(nominalToSpeech(matchedClass.nominal));
-                  updateResultUI(matchedClass);
-                } else {
-                  // Uang yang sama masih di depan kamera, pertahankan tampilan hasil tanpa suara berulang
-                  updateResultUI(matchedClass);
-                }
-              }
-            } else {
-              // Belum tercapai konsensus pasti, tampilkan live scanning feedback
-              app.unconfirmedFramesCount++;
-              app.currentState = (avgConf >= THRESHOLDS.UNCERTAIN) ? "UNCERTAIN" : "UNKNOWN";
-              updateDiagnosticPanel(app.currentState, chosen.top, chosen.ranked.slice(0, 3), latency);
-
-              // Tampilkan candidate preview di card bawah agar user tahu AI aktif menganalisis
-              if (chosen && chosen.top && chosen.top.prob >= 0.40 && app.lastConfirmedNominal !== chosen.top.nominal) {
-                el.pillSubtitle.textContent = "Menganalisis uang...";
-                el.pillTitle.textContent = `${formatRupiah(chosen.top.nominal)}?`;
-              }
-
-              // -------------------------------------------------------------
-              // Panduan Suara Non-Spamming untuk Penyandang Tunanetra
-              // -------------------------------------------------------------
-              if (app.unconfirmedFramesCount >= 14) {
-                if (loc.qualityStatus === "DARK" || loc.qualityStatus === "BLURRY" || loc.qualityStatus === "OVEREXPOSED") {
-                  speakGuidance("Pencahayaan kurang atau kamera buram, nyalakan lampu atau senter.");
-                } else if (loc.status === "NO_OBJECT" || loc.status === "TOO_FAR") {
-                  speakGuidance("Arahkan uang lebih dekat ke kamera.");
-                } else if (loc.status === "TOO_CLOSE") {
-                  speakGuidance("Jauhkan sedikit uangnya.");
-                } else if (sortedVotes.length >= 2 && voteCount <= 3) {
-                  speakGuidance("Ubah sedikit sudut uang.");
-                }
+            if (el.bottomCard && el.bottomCard.classList.contains("state-result")) {
+              el.bottomCard.className = "bottom-pill-card state-idle";
+              el.pillSubtitle.textContent = "Scanning Otomatis...";
+              el.pillTitle.textContent = "Arahkan Uang ke Kamera";
+              if (el.banknoteThumb && el.thumbNumber) {
+                el.banknoteThumb.className = "banknote-thumbnail val-scanning";
+                el.thumbNumber.textContent = "...";
               }
             }
           }
         }
-      } catch (loopErr) {
-        console.warn("[MLOps Loop] Peringatan frame:", loopErr);
+
+        // =========================================================================
+        // KONSENSUS TEMPORAL MULTI-MODAL (MINIMAL 2 FRAME KONSISTEN)
+        // =========================================================================
+        if (app.slidingWindow.length >= 2) {
+          const voteCounts = {};
+          const sumProb = {};
+          for (const vote of app.slidingWindow) {
+            const key = `${vote.type}_${vote.code}`;
+            voteCounts[key] = (voteCounts[key] || 0) + 1;
+            sumProb[key] = (sumProb[key] || 0) + vote.prob;
+          }
+
+          let winKey = null;
+          let maxVotes = 0;
+          for (const [key, count] of Object.entries(voteCounts)) {
+            if (count > maxVotes) {
+              maxVotes = count;
+              winKey = key;
+            }
+          }
+
+          const avgProb = sumProb[winKey] / maxVotes;
+          if (maxVotes >= 2 && avgProb >= 0.40) {
+            const [winType, winCode] = winKey.split("_");
+            const winVote = app.slidingWindow.find(v => v.type === winType && v.code === winCode);
+
+            if (winType === "coin") {
+              // -------------------------------------------------------------
+              // HASIL DETEKSI UANG KOIN
+              // -------------------------------------------------------------
+              if (winCode === "sisi_garuda") {
+                if (el.bottomCard) {
+                  el.bottomCard.className = "bottom-pill-card state-result";
+                  el.pillSubtitle.textContent = "🪙 Koin: Sisi Pahlawan / Garuda";
+                  el.pillTitle.textContent = "Balik Koin untuk Membaca Nominal";
+                  if (el.banknoteThumb && el.thumbNumber) {
+                    el.banknoteThumb.className = "banknote-thumbnail val-coin-garuda";
+                    el.thumbNumber.textContent = "🦅";
+                  }
+                }
+                if (now - app.lastSpokenTimestamp > 4500) {
+                  app.lastSpokenTimestamp = now;
+                  getar([80, 50, 80]);
+                  speak("Sisi gambar Garuda atau Pahlawan, silakan balik koin untuk memastikan angka nominal.");
+                }
+              } else {
+                const nominal = winVote.nominal;
+                app.lastConfirmedNominal = nominal;
+                app.lastResult = { nominal, isCoin: true };
+
+                if (el.bottomCard) {
+                  el.bottomCard.className = "bottom-pill-card state-result";
+                  el.pillSubtitle.textContent = `🪙 Uang Logam Terdeteksi (${Math.round(avgProb * 100)}%)`;
+                  el.pillTitle.textContent = `Rp ${nominal.toLocaleString("id-ID")}`;
+                  if (el.banknoteThumb && el.thumbNumber) {
+                    el.banknoteThumb.className = `banknote-thumbnail val-coin-${nominal}`;
+                    el.thumbNumber.textContent = winVote.badge;
+                  }
+                }
+
+                triggerSuccessBadge();
+
+                if (now - app.lastSpokenTimestamp > THRESHOLDS.SPEECH_SAME_BILL_COOLDOWN_MS || app.lastSpokenNominal !== nominal) {
+                  app.lastSpokenNominal = nominal;
+                  app.lastSpokenTimestamp = now;
+                  getar([120]);
+                  speak(nominalToSpeech(nominal, true));
+                }
+              }
+            } else {
+              // -------------------------------------------------------------
+              // HASIL DETEKSI UANG KERTAS
+              // -------------------------------------------------------------
+              const nominal = winVote.nominal;
+              app.lastConfirmedNominal = nominal;
+              app.lastResult = { nominal, isCoin: false };
+
+              if (el.bottomCard) {
+                el.bottomCard.className = "bottom-pill-card state-result";
+                el.pillSubtitle.textContent = `💵 Uang Kertas Terdeteksi (${Math.round(avgProb * 100)}%)`;
+                el.pillTitle.textContent = `Rp ${nominal.toLocaleString("id-ID")}`;
+                if (el.banknoteThumb && el.thumbNumber) {
+                  el.banknoteThumb.className = `banknote-thumbnail val-${nominal}`;
+                  el.thumbNumber.textContent = winVote.badge;
+                }
+              }
+
+              triggerSuccessBadge();
+
+              if (now - app.lastSpokenTimestamp > THRESHOLDS.SPEECH_SAME_BILL_COOLDOWN_MS || app.lastSpokenNominal !== nominal) {
+                app.lastSpokenNominal = nominal;
+                app.lastSpokenTimestamp = now;
+                getar([120]);
+                speak(nominalToSpeech(nominal, false));
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("[MLOps] Error scan frame:", err);
       }
 
-      // Pertahankan target interval ~160ms (~6 FPS)
       const elapsed = performance.now() - loopStart;
-      const waitTime = Math.max(25, THRESHOLDS.TARGET_FRAME_INTERVAL_MS - elapsed);
-      await sleep(waitTime);
+      const sleepTime = Math.max(15, THRESHOLDS.TARGET_FRAME_INTERVAL_MS - elapsed);
+      await sleep(sleepTime);
     }
-
-    app.scanLoopActive = false;
   }
 
   // -------------------------------------------------------------------------
@@ -1740,7 +1667,7 @@
     document.addEventListener("click", onUserInteraction, { passive: true });
 
     setTimeout(() => {
-      speak("Rupiah Reader siap. Pemindaian otomatis aktif. Arahkan uang ke kamera.");
+      speak("Rupiah Reader siap. Deteksi otomatis aktif. Arahkan uang kertas atau uang koin ke kamera.");
     }, 600);
   }
 

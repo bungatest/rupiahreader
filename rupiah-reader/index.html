@@ -101,17 +101,11 @@
       </div>
     </header>
 
-    <!-- Segmented Mode Switcher: Uang Kertas vs Uang Logam (Koin) -->
-    <div class="mode-switch-wrapper" role="region" aria-label="Pilihan Jenis Uang">
-      <div class="mode-segmented-bar" role="tablist">
-        <button id="mode-banknote-btn" class="mode-tab-btn active" type="button" role="tab" aria-selected="true" aria-label="Mode Uang Kertas">
-          <span class="mode-tab-icon">💵</span>
-          <span class="mode-tab-text">Uang Kertas</span>
-        </button>
-        <button id="mode-coin-btn" class="mode-tab-btn" type="button" role="tab" aria-selected="false" aria-label="Mode Uang Logam (Koin)">
-          <span class="mode-tab-icon">🪙</span>
-          <span class="mode-tab-text">Uang Logam</span>
-        </button>
+    <!-- Autonomous AI Multi-Modal Badge (100% Otomatis Kertas & Koin) -->
+    <div class="mode-switch-wrapper" role="status" aria-live="polite">
+      <div class="mode-segmented-bar auto-mode-pill">
+        <span class="mode-tab-icon">⚡</span>
+        <span class="mode-tab-text">Auto-Detect: Kertas & Koin Aktif</span>
       </div>
     </div>
 
