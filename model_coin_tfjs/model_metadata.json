@@ -1,0 +1,71 @@
+{
+  "model_name": "MobileNetV2 5-Class (Rupiah Coins Assistive AI)",
+  "model_version": "2.0.0-client-tfjs",
+  "architecture": "MobileNetV2 + Rescaling Layer",
+  "framework": "TensorFlow.js WebGL / WASM / CPU",
+  "input_shape": [
+    1,
+    224,
+    224,
+    3
+  ],
+  "input_range": "[0, 255] RGB raw canvas pixels",
+  "classes": {
+    "0": {
+      "code": "100",
+      "nominal": 100,
+      "name": "Seratus Rupiah Koin",
+      "badge": "Rp 100",
+      "material": "Aluminium (Diameter 23 mm)",
+      "pahlawan": "Prof. Dr. Ir. Herman Johannes",
+      "color": "#94a3b8"
+    },
+    "1": {
+      "code": "1000",
+      "nominal": 1000,
+      "name": "Seribu Rupiah Koin",
+      "badge": "Rp 1.000",
+      "material": "Bimetal / Nikel (Diameter 24.15 mm)",
+      "pahlawan": "Mr. I Gusti Ketut Pudja / Kelapa Sawit",
+      "color": "#eab308"
+    },
+    "2": {
+      "code": "200",
+      "nominal": 200,
+      "name": "Dua Ratus Rupiah Koin",
+      "badge": "Rp 200",
+      "material": "Aluminium (Diameter 25 mm)",
+      "pahlawan": "Dr. Tjipto Mangoenkoesoemo",
+      "color": "#cbd5e1"
+    },
+    "3": {
+      "code": "500",
+      "nominal": 500,
+      "name": "Lima Ratus Rupiah Koin",
+      "badge": "Rp 500",
+      "material": "Aluminium Tebal (Diameter 27 mm)",
+      "pahlawan": "Letjen TNI T.B. Simatupang / Melati",
+      "color": "#e2e8f0"
+    },
+    "4": {
+      "code": "sisi_garuda",
+      "nominal": 0,
+      "name": "Sisi Garuda / Pahlawan",
+      "badge": "Sisi Balik / Garuda",
+      "material": "Sisi Non-Nominal (Sisi Balik)",
+      "pahlawan": "Lambang Negara Burung Garuda / Tokoh Nasional",
+      "color": "#a855f7"
+    }
+  },
+  "metrics": {
+    "nominal_accuracy": 0.9643,
+    "macro_f1": 0.9602,
+    "f1_scores": {
+      "100": 0.9412,
+      "200": 0.9333,
+      "500": 0.9524,
+      "1000": 1.0,
+      "sisi_garuda": 0.9744
+    }
+  }
+}

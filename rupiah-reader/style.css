@@ -1044,3 +1044,124 @@ body.show-success .success-badge {
   font-weight: 600;
   color: #f1f5f9;
 }
+
+
+/* ==========================================================================
+   Segmented Mode Switcher (Kertas vs Koin) & Coin Thumbnail Styles
+   ========================================================================== */
+.mode-switch-wrapper {
+  position: absolute;
+  top: 74px;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 35;
+  pointer-events: auto;
+}
+
+.mode-segmented-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  background: rgba(15, 23, 42, 0.78);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 9999px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.mode-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 9999px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.75);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  outline: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mode-tab-btn:hover {
+  color: #ffffff;
+}
+
+.mode-tab-btn.active {
+  background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%);
+  color: #ffffff;
+  box-shadow: 0 4px 14px rgba(124, 58, 237, 0.5);
+}
+
+.mode-tab-icon {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.mode-tab-text {
+  letter-spacing: 0.2px;
+}
+
+/* Transisi viewfinder ke bentuk koin melingkar */
+body.mode-coin .viewfinder {
+  border-radius: 50% !important;
+  max-width: 270px !important;
+  max-height: 270px !important;
+  aspect-ratio: 1 / 1 !important;
+  box-shadow: 0 0 35px rgba(168, 85, 247, 0.3), inset 0 0 25px rgba(168, 85, 247, 0.2) !important;
+}
+
+body.mode-coin .vf-corner {
+  display: none !important;
+}
+
+body.mode-coin .viewfinder::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border: 3px dashed rgba(168, 85, 247, 0.85);
+  border-radius: 50%;
+  animation: coinRingRotate 18s linear infinite;
+}
+
+@keyframes coinRingRotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Thumbnail Koin Dinamis */
+.banknote-thumbnail.val-coin-100 {
+  background: linear-gradient(135deg, #64748b 0%, #475569 100%) !important;
+  border: 2px solid #94a3b8 !important;
+  border-radius: 50% !important;
+}
+.banknote-thumbnail.val-coin-200 {
+  background: linear-gradient(135deg, #94a3b8 0%, #64748b 100%) !important;
+  border: 2px solid #cbd5e1 !important;
+  border-radius: 50% !important;
+}
+.banknote-thumbnail.val-coin-500 {
+  background: linear-gradient(135deg, #cbd5e1 0%, #94a3b8 100%) !important;
+  border: 2px solid #e2e8f0 !important;
+  border-radius: 50% !important;
+}
+.banknote-thumbnail.val-coin-1000 {
+  background: linear-gradient(135deg, #eab308 0%, #ca8a04 100%) !important;
+  border: 2px solid #fef08a !important;
+  border-radius: 50% !important;
+}
+.banknote-thumbnail.val-coin-garuda {
+  background: linear-gradient(135deg, #a855f7 0%, #7c3aed 100%) !important;
+  border: 2px solid #d8b4fe !important;
+  border-radius: 50% !important;
+}

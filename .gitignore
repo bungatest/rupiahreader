@@ -22,6 +22,8 @@ model_coins/
 *.json
 !manifest.json
 !model_tfjs/**
+!model_coin_tfjs/**
+!rupiah-reader/model_coin_tfjs/**
 !rupiah-reader/model_tfjs/**
 
 # Datasets & Documents

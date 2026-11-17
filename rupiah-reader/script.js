@@ -30,6 +30,19 @@
   ];
   window.BANKNOTE_CLASSES = BANKNOTE_CLASSES;
 
+  // ---------------------------------------------------------------------------
+  // Registri Kelas Nominal Uang Logam (Koin) Rupiah 5-Class (MobileNetV2 Fine-Tuned)
+  // ---------------------------------------------------------------------------
+  const COIN_CLASSES = [
+    { index: 0, code: "100", nominal: 100, name: "Seratus Rupiah Koin", badge: "100", valClass: "val-coin-100", hero: "Prof. Herman Johannes", color: "#94a3b8" },
+    { index: 1, code: "1000", nominal: 1000, name: "Seribu Rupiah Koin", badge: "1.000", valClass: "val-coin-1000", hero: "Mr. I Gusti Ketut Pudja", color: "#eab308" },
+    { index: 2, code: "200", nominal: 200, name: "Dua Ratus Rupiah Koin", badge: "200", valClass: "val-coin-200", hero: "Dr. Tjipto Mangoenkoesoemo", color: "#cbd5e1" },
+    { index: 3, code: "500", nominal: 500, name: "Lima Ratus Rupiah Koin", badge: "500", valClass: "val-coin-500", hero: "Letjen TNI T.B. Simatupang", color: "#e2e8f0" },
+    { index: 4, code: "sisi_garuda", nominal: 0, name: "Sisi Garuda / Pahlawan", badge: "Garuda", valClass: "val-coin-garuda", hero: "Lambang Garuda / Pahlawan", color: "#a855f7" }
+  ];
+  window.COIN_CLASSES = COIN_CLASSES;
+
+
   // Ambang Batas Keyakinan Terkalibrasi (Sangat Responsif & Bebas Lockup)
   const THRESHOLDS = {
     CONFIRMED: 0.50,             // Minimal 50% rata-rata confidence untuk konfirmasi
@@ -87,6 +100,10 @@
   // -------------------------------------------------------------------------
   const $ = (id) => document.getElementById(id);
   const el = {
+    // Mode Switcher (Kertas vs Koin)
+    modeBanknoteBtn: $("mode-banknote-btn"),
+    modeCoinBtn: $("mode-coin-btn"),
+
     video: $("camera-preview"),
     canvas: $("capture-canvas"),
     tapArea: $("tap-fullscreen"),
@@ -161,6 +178,11 @@
   const isDebugUrl = new URLSearchParams(window.location.search).get("debug") === "1";
 
   const app = {
+    // Dual Mode (Banknote vs Coin)
+    currentMode: "banknote",
+    tfCoinModel: null,
+    coinModelReady: false,
+
     stream: null,
     currentFacingMode: "environment", // default environment, fallback user
     torchOn: false,
@@ -876,6 +898,170 @@
   // -------------------------------------------------------------------------
   // Loop Pemindaian Kontinu & Konsensus Sliding Window (Aksesibilitas Tunanetra)
   // -------------------------------------------------------------------------
+  async   // -------------------------------------------------------------------------
+  // Inisialisasi Model Koin In-Browser TensorFlow.js (MobileNetV2 5-Class)
+  // -------------------------------------------------------------------------
+  async function initCoinModel() {
+    if (typeof tf === "undefined") {
+      setTimeout(initCoinModel, 400);
+      return;
+    }
+
+    try {
+      await tf.ready();
+      const coinModelLocations = [
+        "./model_coin_tfjs/model.json",
+        "model_coin_tfjs/model.json",
+        "../model_coin_tfjs/model.json"
+      ];
+
+      let loaded = null;
+      for (const loc of coinModelLocations) {
+        try {
+          console.log(`[MLOps] Memuat model koin dari: ${loc}`);
+          loaded = await tf.loadLayersModel(loc, {
+            requestInit: { cache: "no-store" }
+          });
+          if (loaded) break;
+        } catch (err) {
+          console.warn(`[MLOps] Percobaan memuat koin dari ${loc} gagal:`, err);
+        }
+      }
+
+      if (!loaded) {
+        throw new Error("Tidak dapat menemukan model_coin_tfjs/model.json.");
+      }
+
+      app.tfCoinModel = loaded;
+      app.coinModelReady = true;
+
+      // Warmup forward pass untuk kompilasi shader WebGL
+      tf.tidy(() => {
+        const dummy = tf.zeros([1, 224, 224, 3]);
+        app.tfCoinModel.predict(dummy);
+      });
+
+      console.log("[MLOps] MobileNetV2 5-Class (Koin) siap inferensi!");
+    } catch (err) {
+      console.warn("[MLOps] Error inisialisasi model koin:", err);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Inferensi Frame Khusus Uang Logam (Koin)
+  // -------------------------------------------------------------------------
+  async function predictCoinFrame(videoEl) {
+    const vw = videoEl.videoWidth;
+    const vh = videoEl.videoHeight;
+    if (!vw || !vh || !app.tfCoinModel) return null;
+
+    const t0 = performance.now();
+    const isFrontCam = document.body.classList.contains("cam-user") || (app.currentFacingMode === "user");
+
+    // Crop terpusat 1:1 pada area viewfinder koin
+    const minDim = Math.min(vw, vh);
+    const cropSize = Math.round(minDim * 0.65);
+    const sx = Math.max(0, Math.round((vw - cropSize) / 2));
+    const sy = Math.max(0, Math.round((vh - cropSize) / 2));
+
+    const tensorData = extractTensorAndCanvas(videoEl, sx, sy, cropSize, cropSize, isFrontCam);
+    if (!tensorData) return null;
+
+    const { tensor } = tensorData;
+    let probs = null;
+    try {
+      const predTensor = app.tfCoinModel.predict(tensor);
+      probs = await predTensor.data();
+      predTensor.dispose();
+    } finally {
+      tensor.dispose();
+    }
+
+    const latency = Math.round(performance.now() - t0);
+    app.lastLatencyMs = latency;
+
+    const ranked = Array.from(probs)
+      .map((prob, idx) => ({ ...COIN_CLASSES[idx], prob }))
+      .sort((a, b) => b.prob - a.prob);
+
+    const top = ranked[0];
+    const second = ranked[1] || { prob: 0 };
+    const margin = top.prob - second.prob;
+
+    return {
+      top,
+      second,
+      margin,
+      ranked,
+      latency,
+      cropBox: { sx, sy, sw: cropSize, sh: cropSize }
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // Pergantian Mode Deteksi (Uang Kertas vs Uang Logam)
+  // -------------------------------------------------------------------------
+  function switchDetectionMode(mode) {
+    if (app.currentMode === mode) return;
+    app.currentMode = mode;
+    app.slidingWindow = [];
+    app.lastSpokenNominal = null;
+    app.lastConfirmedNominal = null;
+    app.consecutiveEmptyFrames = 0;
+
+    if (mode === "coin") {
+      document.body.classList.add("mode-coin");
+      if (el.modeBanknoteBtn) {
+        el.modeBanknoteBtn.classList.remove("active");
+        el.modeBanknoteBtn.setAttribute("aria-selected", "false");
+      }
+      if (el.modeCoinBtn) {
+        el.modeCoinBtn.classList.add("active");
+        el.modeCoinBtn.setAttribute("aria-selected", "true");
+      }
+
+      if (el.bottomCard) {
+        el.bottomCard.className = "bottom-pill-card state-idle";
+        el.pillSubtitle.textContent = "Mode Uang Logam";
+        el.pillTitle.textContent = "Arahkan Koin ke Kamera";
+      }
+      if (el.banknoteThumb && el.thumbNumber) {
+        el.banknoteThumb.className = "banknote-thumbnail val-scanning";
+        el.thumbNumber.textContent = "🪙";
+      }
+
+      getar([80]);
+      speak("Mode deteksi uang logam aktif, arahkan koin ke kamera.");
+
+      if (!app.coinModelReady) {
+        initCoinModel();
+      }
+    } else {
+      document.body.classList.remove("mode-coin");
+      if (el.modeBanknoteBtn) {
+        el.modeBanknoteBtn.classList.add("active");
+        el.modeBanknoteBtn.setAttribute("aria-selected", "true");
+      }
+      if (el.modeCoinBtn) {
+        el.modeCoinBtn.classList.remove("active");
+        el.modeCoinBtn.setAttribute("aria-selected", "false");
+      }
+
+      if (el.bottomCard) {
+        el.bottomCard.className = "bottom-pill-card state-idle";
+        el.pillSubtitle.textContent = "Mode Uang Kertas";
+        el.pillTitle.textContent = "Arahkan Uang ke Kamera";
+      }
+      if (el.banknoteThumb && el.thumbNumber) {
+        el.banknoteThumb.className = "banknote-thumbnail val-scanning";
+        el.thumbNumber.textContent = "💵";
+      }
+
+      getar([80]);
+      speak("Mode deteksi uang kertas aktif.");
+    }
+  }
+
   async function startContinuousScanLoop() {
     if (app.scanLoopActive) return;
     app.scanLoopActive = true;
@@ -892,6 +1078,131 @@
         await sleep(200);
         continue;
       }
+
+      // -------------------------------------------------------------
+      // CABANG MODE KOIN (Real-time WebGL Inference)
+      // -------------------------------------------------------------
+      if (app.currentMode === "coin") {
+        if (!app.coinModelReady || !app.tfCoinModel) {
+          await sleep(200);
+          continue;
+        }
+
+        try {
+          const coinData = await predictCoinFrame(el.video);
+          if (coinData) {
+            const { top, second, margin, latency } = coinData;
+            const now = Date.now();
+
+            // Expire votes > 700ms
+            app.slidingWindow = app.slidingWindow.filter(item => (now - item.timestamp) < 700);
+
+            if (top && top.prob >= 0.40) {
+              app.slidingWindow.push({
+                nominal: top.nominal,
+                code: top.code,
+                name: top.name,
+                prob: top.prob,
+                margin: margin,
+                timestamp: now
+              });
+
+              if (app.slidingWindow.length > 4) {
+                app.slidingWindow.shift();
+              }
+              app.consecutiveEmptyFrames = 0;
+            } else {
+              app.consecutiveEmptyFrames++;
+              if (app.consecutiveEmptyFrames >= 3) {
+                app.lastSpokenNominal = null;
+                app.lastConfirmedNominal = null;
+                app.slidingWindow = [];
+                if (el.bottomCard && el.bottomCard.classList.contains("state-result")) {
+                  el.bottomCard.className = "bottom-pill-card state-idle";
+                  el.pillSubtitle.textContent = "Scanning Koin...";
+                  el.pillTitle.textContent = "Arahkan Koin ke Kamera";
+                  if (el.banknoteThumb && el.thumbNumber) {
+                    el.banknoteThumb.className = "banknote-thumbnail val-scanning";
+                    el.thumbNumber.textContent = "🪙";
+                  }
+                }
+              }
+            }
+
+            // Hitung konsensus 2 frame berturut-turut
+            if (app.slidingWindow.length >= 2) {
+              const voteCounts = {};
+              const sumProb = {};
+              for (const vote of app.slidingWindow) {
+                voteCounts[vote.code] = (voteCounts[vote.code] || 0) + 1;
+                sumProb[vote.code] = (sumProb[vote.code] || 0) + vote.prob;
+              }
+
+              let winCode = null;
+              let maxVotes = 0;
+              for (const [code, count] of Object.entries(voteCounts)) {
+                if (count > maxVotes) {
+                  maxVotes = count;
+                  winCode = code;
+                }
+              }
+
+              const avgProb = sumProb[winCode] / maxVotes;
+              if (maxVotes >= 2 && avgProb >= 0.45) {
+                const winClass = COIN_CLASSES.find(c => c.code === winCode) || top;
+
+                if (winCode === "sisi_garuda") {
+                  if (el.bottomCard) {
+                    el.bottomCard.className = "bottom-pill-card state-result";
+                    el.pillSubtitle.textContent = "Sisi Gambar Garuda / Pahlawan";
+                    el.pillTitle.textContent = "Balik Koin untuk Membaca Nominal";
+                    if (el.banknoteThumb && el.thumbNumber) {
+                      el.banknoteThumb.className = "banknote-thumbnail val-coin-garuda";
+                      el.thumbNumber.textContent = "🦅";
+                    }
+                  }
+                  if (now - app.lastSpokenTimestamp > 4500) {
+                    app.lastSpokenTimestamp = now;
+                    getar([80, 50, 80]);
+                    speak("Sisi gambar Garuda atau Pahlawan, silakan balik koin untuk memastikan angka nominal.");
+                  }
+                } else {
+                  const nominal = winClass.nominal;
+                  app.lastConfirmedNominal = nominal;
+                  app.lastResult = { nominal, isCoin: true };
+
+                  if (el.bottomCard) {
+                    el.bottomCard.className = "bottom-pill-card state-result";
+                    el.pillSubtitle.textContent = "Hasil Deteksi Koin";
+                    el.pillTitle.textContent = `Rp ${nominal.toLocaleString("id-ID")}`;
+                    if (el.banknoteThumb && el.thumbNumber) {
+                      el.banknoteThumb.className = `banknote-thumbnail val-coin-${nominal}`;
+                      el.thumbNumber.textContent = winClass.badge;
+                    }
+                  }
+
+                  triggerSuccessBadge();
+
+                  if (now - app.lastSpokenTimestamp > THRESHOLDS.SPEECH_SAME_BILL_COOLDOWN_MS || app.lastSpokenNominal !== nominal) {
+                    app.lastSpokenNominal = nominal;
+                    app.lastSpokenTimestamp = now;
+                    getar([120]);
+                    speak(nominalToSpeech(nominal, true));
+                  }
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.warn("[MLOps] Error frame koin:", err);
+        }
+
+        const elapsed = performance.now() - loopStart;
+        const sleepTime = Math.max(10, THRESHOLDS.TARGET_FRAME_INTERVAL_MS - elapsed);
+        await sleep(sleepTime);
+        continue;
+      }
+
 
       try {
         const frameData = await predictBanknoteFrame(el.video);
@@ -1315,6 +1626,13 @@
   // Pendaftaran Event Listeners
   // -------------------------------------------------------------------------
   function attachEventListeners() {
+    if (el.modeBanknoteBtn) {
+      el.modeBanknoteBtn.addEventListener("click", () => switchDetectionMode("banknote"));
+    }
+    if (el.modeCoinBtn) {
+      el.modeCoinBtn.addEventListener("click", () => switchDetectionMode("coin"));
+    }
+
     if (el.tapArea) {
       el.tapArea.addEventListener("click", (e) => {
         if (e.target.closest(".nav-circle-btn, .floating-zoom-btn, .pill-torch-btn, .menu-bottom-sheet")) return;
