@@ -1345,6 +1345,9 @@
   // -------------------------------------------------------------------------
   // Akses Kamera Penuh & Switch Kamera
   // -------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // Inisialisasi & Pengalihan Kamera (Multi-Tier Fallback untuk Laptop & HP)
+  // -------------------------------------------------------------------------
   async function startCamera(facingMode = "environment") {
     if (app.stream) {
       try {
@@ -1371,7 +1374,7 @@
 
     let stream = null;
 
-    // Tahap 1: Coba resolusi ideal 1280x720 dengan facingMode yang ditargetkan
+    // Tahap 1: Coba resolusi ideal 1280x720 dengan facingMode target
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -1382,7 +1385,7 @@
         audio: false,
       });
     } catch (err1) {
-      console.warn("Akses kamera tahap 1 (resolusi ideal) gagal, coba tahap 2:", err1);
+      console.warn("[MLOps Camera] Tahap 1 (resolusi ideal) gagal, coba tahap 2:", err1);
       // Tahap 2: Coba tanpa constraint resolusi kaku
       try {
         stream = await navigator.mediaDevices.getUserMedia({
@@ -1390,19 +1393,18 @@
           audio: false,
         });
       } catch (err2) {
-        console.warn("Akses kamera tahap 2 (facingMode) gagal, coba tahap 3 (generic video):", err2);
-        // Tahap 3: Fallback generic video: true
+        console.warn("[MLOps Camera] Tahap 2 (facingMode) gagal, coba tahap 3 (generic video):", err2);
+        // Tahap 3: Fallback generic video: true (paling ampuh untuk webcam laptop USB/UVC)
         try {
           stream = await navigator.mediaDevices.getUserMedia({
             video: true,
             audio: false,
           });
         } catch (err3) {
-          console.error("Semua percobaan akses kamera ditolak atau perangkat tidak ditemukan:", err3);
+          console.error("[MLOps Camera] Semua percobaan akses kamera belum diizinkan:", err3);
           if (el.chipText) el.chipText.textContent = "Kamera Belum Aktif";
-          if (el.pillSubtitle) el.pillSubtitle.textContent = "Izin Kamera Dibutuhkan";
-          if (el.pillTitle) el.pillTitle.textContent = "Ketuk Layar untuk Aktifkan Kamera";
-          speak("Izin kamera belum aktif. Ketuk layar atau izinkan akses kamera di browser Anda.");
+          if (el.pillSubtitle) el.pillSubtitle.textContent = "Izin Kamera Terdeteksi";
+          if (el.pillTitle) el.pillTitle.textContent = "Ketuk Layar untuk Membuka Kamera";
           return;
         }
       }
@@ -1413,17 +1415,31 @@
       el.video.srcObject = stream;
       el.video.muted = true;
 
+      // Pastikan video dimainkan begitu metadata piksel siap
+      el.video.onloadedmetadata = async () => {
+        try {
+          await el.video.play();
+          console.log(`[MLOps Camera] Kamera aktif: ${el.video.videoWidth}x${el.video.videoHeight}`);
+          if (el.pillTitle && el.pillTitle.textContent.includes("Ketuk Layar")) {
+            el.pillSubtitle.textContent = "Scanning Otomatis...";
+            el.pillTitle.textContent = "Arahkan Uang ke Kamera";
+          }
+        } catch (playErr) {
+          console.warn("[MLOps Camera] Autoplay tertunda, menunggu gestur:", playErr);
+        }
+      };
+
       try {
         await el.video.play();
       } catch (playErr) {
-        console.warn("Autoplay dicegah browser, menunggu interaksi gestur pengguna:", playErr);
+        console.warn("[MLOps Camera] Autoplay dicegah browser, menunggu interaksi gestur pengguna:", playErr);
       }
 
       if (el.sheetCamVal) {
         el.sheetCamVal.textContent = targetFacing === "user" ? "Kamera Depan / Webcam" : "Kamera Belakang";
       }
-      if (el.chipText && !app.modelReady) {
-        el.chipText.textContent = "Camera Ready";
+      if (el.chipText) {
+        el.chipText.textContent = app.modelReady ? "AI Scanner Active" : "Camera Ready";
       }
     }
   }
@@ -1641,24 +1657,49 @@
   // -------------------------------------------------------------------------
   // Bootstrapping Aplikasi (Non-blocking & Auto-recovery)
   // -------------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // Bootstrapping Aplikasi (Non-blocking & Auto-recovery)
+  // -------------------------------------------------------------------------
   async function bootstrap() {
     attachEventListeners();
 
     // Jalankan inisialisasi AI model dan kamera secara paralel (non-blocking)
-    initTfjsModel().catch((err) => console.warn("[MLOps] Error memuat model AI:", err));
+    initCoinModel().catch((err) => console.warn("[MLOps] Error model koin:", err));
+    initTfjsModel().catch((err) => console.warn("[MLOps] Error model uang kertas:", err));
     startCamera().catch((err) => console.warn("[MLOps] Error inisialisasi kamera:", err));
 
-    // Fallback interaksi: jika browser memerlukan klik/sentuhan user untuk memulai kamera / video.play()
+    // Auto-recovery jika izin kamera baru saja diberikan oleh pengguna di popup browser
+    if (navigator.permissions && navigator.permissions.query) {
+      try {
+        const perm = await navigator.permissions.query({ name: "camera" });
+        perm.onchange = () => {
+          console.log("[MLOps Camera] Status izin kamera berubah:", perm.state);
+          if (perm.state === "granted" && (!app.stream || (el.video && el.video.paused))) {
+            startCamera(app.currentFacingMode);
+          }
+        };
+      } catch (_) {}
+    }
+
+    // Auto-recovery saat tab browser kembali aktif (window focus)
+    window.addEventListener("focus", () => {
+      if (!app.stream || (el.video && el.video.paused)) {
+        console.log("[MLOps Camera] Jendela aktif kembali, menyegarkan kamera...");
+        startCamera(app.currentFacingMode);
+      }
+    });
+
+    // Fallback interaksi: klik di mana saja langsung menyalakan kamera jika browser memblokir autoplay
     const onUserInteraction = async () => {
       if (!app.stream) {
-        console.log("[MLOps] Gestur pengguna diterima, mencoba mengaktifkan kamera...");
+        console.log("[MLOps Camera] Gestur pengguna diterima, menyalakan kamera...");
         await startCamera(app.currentFacingMode);
       } else if (el.video && el.video.paused) {
         try {
           el.video.muted = true;
           await el.video.play();
         } catch (err) {
-          console.warn(`[MLOps] Gagal memuat dari ${loc}:`, err);
+          console.warn("[MLOps Camera] Gagal memutar video:", err);
         }
       }
     };
