@@ -124,6 +124,8 @@
 
     // Bottom Pill Card
     bottomCard: $("bottom-card"),
+    camRecoveryUi: $("cam-recovery-ui"),
+    btnFixCam: $("btn-fix-cam"),
     pillIconSlot: $("pill-icon-slot"),
     iconIdle: $("icon-idle"),
     iconScanning: $("icon-scanning"),
@@ -1352,7 +1354,28 @@
   // Inisialisasi & Pengalihan Kamera (Multi-Tier Fallback untuk Laptop & HP)
   // Smart Real-Device Selector & Anti-Virtual/IR Black-Screen Recovery
   // -------------------------------------------------------------------------
-  async function refreshCameraDevices() {
+  function scoreCameraDevice(device) {
+    const label = (device.label || "").toLowerCase();
+    if (!label) return 0; // Belum ada izin, tidak dapat dinilai berdasarkan label
+    let score = 50;
+
+    // Perangkat Virtual (Cast, OBS, Dummy) atau sensor IR (Infrared/Windows Hello)
+    // selalu menghasilkan frame hitam di browser tanpa proyektor IR
+    if (/cast|virtual|obs|dummy|software|ir\b|infrared|depth|hello/i.test(label)) {
+      score -= 100;
+    }
+    // Kamera hardware USB / UVC / Laptop RGB
+    if (/uvc|usb|webcam|integrated|camera|hd|rgb|facetime/i.test(label)) {
+      score += 80;
+    }
+    // Identitas hardware spesifik (e.g. 2b7e:b685 HD WebCam pada laptop user)
+    if (/2b7e|b685|chicony|realtek|sunplus|logitech/i.test(label)) {
+      score += 50;
+    }
+    return score;
+  }
+
+  async function getCameraDevices() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
       return [];
     }
@@ -1360,31 +1383,10 @@
       const devices = await navigator.mediaDevices.enumerateDevices();
       const videoInputs = devices.filter((d) => d.kind === "videoinput");
 
-      // Berikan pembobotan cerdas: utamakan Webcam fisik / RGB nyata
-      // dan berikan penalti keras untuk perangkat Virtual (Cast/OBS) atau sensor IR
-      const scored = videoInputs.map((d) => {
-        const label = (d.label || "").toLowerCase();
-        let score = 50;
-
-        // Virtual camera (Cast, OBS, Dummy) atau sensor IR (Infrared/Windows Hello)
-        // selalu menghasilkan frame hitam di browser tanpa proyektor IR
-        if (/cast|virtual|obs|dummy|software|ir\b|infrared|depth|hello/i.test(label)) {
-          score -= 90;
-        }
-        // Kamera hardware USB / UVC / Laptop
-        if (/uvc|usb|webcam|integrated|hd|rgb|facetime/i.test(label)) {
-          score += 70;
-        }
-        // Identitas hardware spesifik (e.g. 2b7e:b685 HD WebCam pada laptop user)
-        if (/2b7e|b685|camera|chicony|realtek|sunplus|logitech/i.test(label)) {
-          score += 40;
-        }
-        return { device: d, score };
-      });
-
-      scored.sort((a, b) => b.score - a.score);
-      app.availableCameras = scored.map((s) => s.device);
-      console.log("[MLOps Camera] Kamera terdeteksi:", app.availableCameras.map(c => `${c.label || 'Kamera (Izin Tertunda)'} [${c.deviceId.slice(0, 8)}]`));
+      // Urutkan: kamera hardware fisik berperingkat tertinggi berada di posisi pertama
+      videoInputs.sort((a, b) => scoreCameraDevice(b) - scoreCameraDevice(a));
+      app.availableCameras = videoInputs;
+      console.log("[MLOps Camera] Kamera terdeteksi:", app.availableCameras.map(c => `${c.label || 'Kamera (Izin Tertunda)'} [${c.deviceId ? c.deviceId.slice(0, 8) : 'unknown'}] (Skor: ${scoreCameraDevice(c)})`));
       return app.availableCameras;
     } catch (err) {
       console.warn("[MLOps Camera] Gagal enumerateDevices:", err);
@@ -1401,20 +1403,6 @@
     }
 
     const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-    
-    // Perbarui daftar kamera fisik yang tersedia di sistem
-    await refreshCameraDevices();
-
-    // Tentukan kamera target
-    let targetDeviceId = explicitDeviceId;
-    if (forceNext && app.availableCameras.length > 1) {
-      app.activeCameraIndex = (app.activeCameraIndex + 1) % app.availableCameras.length;
-      targetDeviceId = app.availableCameras[app.activeCameraIndex]?.deviceId;
-    } else if (!targetDeviceId && app.availableCameras.length > 0) {
-      if (app.activeCameraIndex >= app.availableCameras.length) app.activeCameraIndex = 0;
-      targetDeviceId = app.availableCameras[app.activeCameraIndex]?.deviceId;
-    }
-
     const targetFacing = isMobile ? facingMode : "user";
     app.currentFacingMode = targetFacing;
 
@@ -1430,10 +1418,26 @@
       el.video.setAttribute("webkit-playsinline", "");
     }
 
+    // Refresh daftar kamera yang tersedia di sistem
+    await getCameraDevices();
+
+    let targetDeviceId = explicitDeviceId;
+    if (forceNext && app.availableCameras.length > 1) {
+      app.activeCameraIndex = (app.activeCameraIndex + 1) % app.availableCameras.length;
+      targetDeviceId = app.availableCameras[app.activeCameraIndex]?.deviceId;
+    } else if (!targetDeviceId) {
+      // Cari kamera yang memiliki label hardware valid dan bukan virtual (jika izin sudah ada)
+      const physicalCams = app.availableCameras.filter(c => scoreCameraDevice(c) > 0);
+      if (physicalCams.length > 0) {
+        if (app.activeCameraIndex >= physicalCams.length) app.activeCameraIndex = 0;
+        targetDeviceId = physicalCams[app.activeCameraIndex]?.deviceId;
+      }
+    }
+
     let stream = null;
     let usedDevice = null;
 
-    // Tahap 1: Coba dengan deviceId spesifik (menghindari Cast Virtual Camera / IR)
+    // Tahap 1: Coba dengan targetDeviceId jika ditentukan secara eksplisit
     if (targetDeviceId) {
       try {
         stream = await navigator.mediaDevices.getUserMedia({
@@ -1462,7 +1466,8 @@
       }
     }
 
-    // Tahap 2: Jika belum dapat stream, gunakan facingMode (sangat cocok untuk smartphone)
+    // Tahap 2: Jika belum ada targetDeviceId (startup pertama ketika label belum diketahui oleh browser),
+    // gunakan facingMode ideal (W3C standard). Browser otomatis memilih Webcam fisik utama.
     if (!stream) {
       try {
         stream = await navigator.mediaDevices.getUserMedia({
@@ -1473,6 +1478,7 @@
           },
           audio: false,
         });
+        console.log("[MLOps Camera] Berhasil membuka kamera via facingMode ideal:", targetFacing);
       } catch (errFacing) {
         console.warn("[MLOps Camera] Gagal facingMode ideal, fallback generic video: true:", errFacing);
         try {
@@ -1485,6 +1491,7 @@
           if (el.chipText) el.chipText.textContent = "Kamera Belum Aktif";
           if (el.pillSubtitle) el.pillSubtitle.textContent = "Izin Kamera Terdeteksi";
           if (el.pillTitle) el.pillTitle.textContent = "Ketuk Layar untuk Membuka Kamera";
+          showCameraRecoveryUI();
           return;
         }
       }
@@ -1495,19 +1502,42 @@
       el.video.srcObject = stream;
       el.video.muted = true;
 
-      // Segarkan daftar perangkat setelah stream terbuka (label kamera sekarang terbuka oleh browser)
-      refreshCameraDevices().then((cams) => {
-        if (!usedDevice && cams.length > 0) {
-          const track = stream.getVideoTracks()[0];
-          const settings = track.getSettings ? track.getSettings() : {};
-          if (settings.deviceId) {
-            usedDevice = cams.find((c) => c.deviceId === settings.deviceId);
-          }
+      // SETELAH STREAM DIBUKA: Izin browser sudah 100% granted, sekarang seluruh label terbaca!
+      const activeCams = await getCameraDevices();
+      const track = stream.getVideoTracks()[0];
+      const settings = track.getSettings ? track.getSettings() : {};
+      const activeLabel = (track.label || "").toLowerCase();
+
+      // Cek apakah kamera yang aktif secara keliru adalah kamera virtual / IR
+      const isVirtualOrBad = /cast|virtual|obs|dummy|software|ir\b|infrared/i.test(activeLabel);
+      const physicalAlt = activeCams.find(c => scoreCameraDevice(c) >= 50 && c.deviceId !== settings.deviceId);
+
+      if (isVirtualOrBad && physicalAlt) {
+        console.warn(`[MLOps Camera] Terdeteksi kamera virtual ("${track.label}"). Mengalihkan otomatis ke webcam hardware: "${physicalAlt.label}"...`);
+        speak("Mengalihkan ke webcam utama laptop...");
+        try {
+          track.stop();
+          const altStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              deviceId: { exact: physicalAlt.deviceId },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+            audio: false,
+          });
+          app.stream = altStream;
+          el.video.srcObject = altStream;
+          usedDevice = physicalAlt;
+        } catch (altErr) {
+          console.warn("[MLOps Camera] Gagal mengalihkan otomatis ke hardware:", altErr);
         }
-        if (el.sheetCamVal) {
-          el.sheetCamVal.textContent = usedDevice?.label || (targetFacing === "user" ? "Kamera Depan / Webcam" : "Kamera Belakang");
-        }
-      });
+      } else {
+        usedDevice = activeCams.find(c => c.deviceId === settings.deviceId) || { label: track.label };
+      }
+
+      if (el.sheetCamVal) {
+        el.sheetCamVal.textContent = usedDevice?.label || (targetFacing === "user" ? "Kamera Depan / Webcam" : "Kamera Belakang");
+      }
 
       const playStream = async () => {
         try {
@@ -1517,6 +1547,7 @@
             el.pillSubtitle.textContent = "Scanning Otomatis...";
             el.pillTitle.textContent = "Arahkan Uang ke Kamera";
           }
+          hideCameraRecoveryUI();
         } catch (playErr) {
           console.warn("[MLOps Camera] Autoplay tertunda, menunggu gestur:", playErr);
         }
@@ -1533,7 +1564,7 @@
         el.chipText.textContent = app.modelReady ? "AI Scanner Active" : "Camera Ready";
       }
 
-      // Aktifkan pemeriksaan mandiri frame hitam (Self-healing Black Frame Detection)
+      // Aktifkan pemeriksaan mandiri frame visual (Watchdog Self-Healing)
       scheduleBlackFrameCheck();
     }
   }
@@ -1543,49 +1574,75 @@
     if (blackFrameCheckTimer) clearTimeout(blackFrameCheckTimer);
     blackFrameCheckTimer = setTimeout(() => {
       checkAndHealBlackFrame();
-    }, 700);
+    }, 1100);
   }
 
-  function checkAndHealBlackFrame() {
-    if (!el.video || !app.stream || el.video.paused || el.video.videoWidth === 0) return;
-    if (!app.availableCameras || app.availableCameras.length <= 1) return;
-    if (app.blackFrameHealAttempts >= app.availableCameras.length) return;
+  async function checkAndHealBlackFrame() {
+    if (!el.video || !app.stream) return;
 
-    try {
-      const sampleCanvas = document.createElement("canvas");
-      sampleCanvas.width = 16;
-      sampleCanvas.height = 16;
-      const ctx = sampleCanvas.getContext("2d", { willReadFrequently: true });
-      ctx.drawImage(el.video, 0, 0, 16, 16);
-      const imgData = ctx.getImageData(0, 0, 16, 16).data;
+    // Periksa apakah video macet (videoWidth 0) atau paused
+    const isFrozen = (el.video.videoWidth === 0 || el.video.videoHeight === 0 || el.video.paused);
+    let isPitchBlack = false;
 
-      let totalLuminance = 0;
-      let maxPixel = 0;
-      for (let i = 0; i < imgData.length; i += 4) {
-        const lum = 0.299 * imgData[i] + 0.587 * imgData[i + 1] + 0.114 * imgData[i + 2];
-        totalLuminance += lum;
-        if (lum > maxPixel) maxPixel = lum;
+    if (!isFrozen) {
+      try {
+        const sampleCanvas = document.createElement("canvas");
+        sampleCanvas.width = 16;
+        sampleCanvas.height = 16;
+        const ctx = sampleCanvas.getContext("2d", { willReadFrequently: true });
+        ctx.drawImage(el.video, 0, 0, 16, 16);
+        const imgData = ctx.getImageData(0, 0, 16, 16).data;
+
+        let totalLuminance = 0;
+        let maxPixel = 0;
+        for (let i = 0; i < imgData.length; i += 4) {
+          const lum = 0.299 * imgData[i] + 0.587 * imgData[i + 1] + 0.114 * imgData[i + 2];
+          totalLuminance += lum;
+          if (lum > maxPixel) maxPixel = lum;
+        }
+        const avgLum = totalLuminance / (16 * 16);
+
+        // Jika rata-rata luminance < 1.0 dan max < 3, kamera ini menghasilkan sinyal kosong / hitam total
+        if (avgLum < 1.0 && maxPixel < 3) {
+          isPitchBlack = true;
+          console.warn(`[MLOps Camera] Terdeteksi stream hitam pekat (Luminance: ${avgLum.toFixed(2)}).`);
+        }
+      } catch (e) {
+        console.warn("[MLOps Camera] Gagal verifikasi frame visual:", e);
       }
-      const avgLum = totalLuminance / (16 * 16);
+    }
 
-      // Jika rata-rata luminance < 1.0 dan max < 3, kamera ini menghasilkan sinyal kosong / hitam total
-      if (avgLum < 1.0 && maxPixel < 3) {
-        console.warn(`[MLOps Camera] Terdeteksi stream hitam pekat (Luminance: ${avgLum.toFixed(2)}). Mengalihkan otomatis ke kamera fisik berikutnya...`);
+    if (isFrozen || isPitchBlack) {
+      console.warn(`[MLOps Camera] Masalah visual terdeteksi (Frozen: ${isFrozen}, PitchBlack: ${isPitchBlack}). Percobaan pemulihan #${(app.blackFrameHealAttempts || 0) + 1}...`);
+      if ((app.blackFrameHealAttempts || 0) < (app.availableCameras?.length || 2)) {
         app.blackFrameHealAttempts = (app.blackFrameHealAttempts || 0) + 1;
         speak("Mengalihkan ke kamera fisik webcam...");
-        startCamera(app.currentFacingMode, null, true);
-      } else {
-        app.blackFrameHealAttempts = 0;
-        console.log(`[MLOps Camera] Stream visual aktif terverifikasi (Luminance: ${avgLum.toFixed(2)}). Kamera berfungsi prima.`);
+        await startCamera(app.currentFacingMode, null, true);
+        return;
       }
-    } catch (e) {
-      console.warn("[MLOps Camera] Gagal verifikasi frame visual:", e);
+      showCameraRecoveryUI();
+    } else {
+      app.blackFrameHealAttempts = 0;
+      hideCameraRecoveryUI();
+      console.log(`[MLOps Camera] Stream visual aktif terverifikasi (${el.video.videoWidth}x${el.video.videoHeight}). Kamera berfungsi prima.`);
+    }
+  }
+
+  function showCameraRecoveryUI() {
+    if (el.camRecoveryUi) {
+      el.camRecoveryUi.hidden = false;
+    }
+  }
+
+  function hideCameraRecoveryUI() {
+    if (el.camRecoveryUi) {
+      el.camRecoveryUi.hidden = true;
     }
   }
 
   async function switchCamera() {
     getar(35);
-    await refreshCameraDevices();
+    await getCameraDevices();
 
     if (app.availableCameras && app.availableCameras.length > 1) {
       // Siklus multi-kamera (Webcam Fisik, Kamera Belakang, dsb)
@@ -1754,6 +1811,15 @@
       el.btnSwitchCam.addEventListener("click", (e) => {
         e.stopPropagation();
         switchCamera();
+      });
+    }
+
+    if (el.btnFixCam) {
+      el.btnFixCam.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        getar(40);
+        speak("Menghubungkan langsung ke webcam...");
+        await switchCamera();
       });
     }
 
