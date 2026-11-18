@@ -899,9 +899,6 @@
   }
 
   // -------------------------------------------------------------------------
-  // Loop Pemindaian Kontinu & Konsensus Sliding Window (Aksesibilitas Tunanetra)
-  // -------------------------------------------------------------------------
-  async   // -------------------------------------------------------------------------
   // Inisialisasi Model Koin In-Browser TensorFlow.js (MobileNetV2 5-Class)
   // -------------------------------------------------------------------------
   async function initCoinModel() {
