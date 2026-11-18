@@ -14,9 +14,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=17.0">
+  <link rel="stylesheet" href="style.css?v=18.0">
 </head>
-<body class="theme-modern">
+<body class="theme-modern mode-coin">
   <a class="skip-link" href="#tap-fullscreen">Lewati ke area pemindai</a>
 
   <!-- Panggung Kamera Fullscreen -->
@@ -101,11 +101,21 @@
       </div>
     </header>
 
-    <!-- Autonomous AI Multi-Modal Badge (100% Otomatis Kertas & Koin) -->
-    <div class="mode-switch-wrapper" role="status" aria-live="polite">
-      <div class="mode-segmented-bar auto-mode-pill">
-        <span class="mode-tab-icon">⚡</span>
-        <span class="mode-tab-text">Auto-Detect: Kertas & Koin Aktif</span>
+    <!-- Pilihan Mode Segmented (Koin [Default] | Kertas | Auto) -->
+    <div class="mode-switch-wrapper" role="region" aria-label="Pilihan Mode Pemindai">
+      <div class="mode-segmented-bar">
+        <button id="mode-coin-btn" class="mode-tab-btn active" type="button" aria-selected="true" title="Mode Khusus Uang Logam (Koin)">
+          <span class="mode-tab-icon">🪙</span>
+          <span class="mode-tab-text">Koin</span>
+        </button>
+        <button id="mode-banknote-btn" class="mode-tab-btn" type="button" aria-selected="false" title="Mode Khusus Uang Kertas">
+          <span class="mode-tab-icon">💵</span>
+          <span class="mode-tab-text">Kertas</span>
+        </button>
+        <button id="mode-auto-btn" class="mode-tab-btn" type="button" aria-selected="false" title="Mode Deteksi Otomatis (Kertas & Koin)">
+          <span class="mode-tab-icon">⚡</span>
+          <span class="mode-tab-text">Auto</span>
+        </button>
       </div>
     </div>
 
@@ -139,17 +149,17 @@
 
         <!-- Mode Result: Thumbnail Uang Realistis Sesuai Hasil Deteksi -->
         <div id="icon-result" class="icon-subview subview-result">
-          <div id="banknote-thumbnail" class="banknote-thumbnail val-2000">
+          <div id="banknote-thumbnail" class="banknote-thumbnail val-scanning">
             <span class="thumb-watermark">IDR</span>
-            <span id="thumb-number" class="thumb-number">2.000</span>
+            <span id="thumb-number" class="thumb-number">🪙</span>
           </div>
         </div>
       </div>
 
       <!-- Slot Tengah: Teks Status & Nominal Uang -->
       <div class="pill-text-content">
-        <span id="pill-subtitle" class="pill-subtitle">Scanning...</span>
-        <span id="pill-title" class="pill-title">Posisikan Uang Kertas di Sini</span>
+        <span id="pill-subtitle" class="pill-subtitle">Mode Uang Logam</span>
+        <span id="pill-title" class="pill-title">Posisikan Koin di Dalam Lingkaran</span>
       </div>
 
       <!-- Slot Kanan: Tombol Flashlight / Senter Bulat Ungu -->
@@ -253,6 +263,6 @@
   <!-- TensorFlow.js Library -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
   <script src="coin-reader.js?v=9.2"></script>
-  <script src="script.js?v=17.0"></script>
+  <script src="script.js?v=18.0"></script>
 </body>
 </html>
