@@ -96,8 +96,9 @@ class CoinSessionReader {
 
     if (!this.video.srcObject) {
       try {
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
         this.stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
+          video: { facingMode: isMobile ? { ideal: "environment" } : "user", width: { ideal: 1280 }, height: { ideal: 720 } },
           audio: false,
         });
         this.video.srcObject = this.stream;
